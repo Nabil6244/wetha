@@ -1,6 +1,6 @@
 # Weather Intelligence Studio
 
-A standalone Electron + React + TypeScript application with a local Python/FastAPI service and versioned SQLite storage. **Phase 2 adds the weather intelligence pipeline** to the application foundation. This is not a production broadcasting system.
+A standalone Electron + React + TypeScript application with a local Python/FastAPI service and versioned SQLite storage. **Phase 3 adds a recorded six-role newsroom, versioned script editor and claim review** to the official weather intelligence pipeline. This is not a production broadcasting system.
 
 The initial channel is **US Extreme Weather**. No paid API or existing Semantic YT Studio installation is required.
 
@@ -10,7 +10,11 @@ The initial channel is **US Extreme Weather**. No paid API or existing Semantic 
 - Live NWS active-alert collection and NHC Atlantic public-advisory ingestion through official RSS. Historical NHC archive fetching is also implemented, but the tested archive page returns a source-side 403 in this cloud instance.
 - NHC text import with strict timestamp, position, unit, and source-URL validation. Pasted text remains unverified until an identical official fetch confirms it.
 - Persistent advisory evidence, deduplication, previous-advisory comparison, and **What changed?** measurements.
-- Deterministic source-linked English drafts and structured scene plans with CSV export.
+- Six newsroom roles with typed JSON handoffs, durable run/stage status and inspectable evidence packages.
+- Source-linked English drafts with original forecast wording and revision-specific scene CSV exports.
+- Immutable script revision history, optimistic editing conflicts, paragraph-level claim support and named quote-based attestations.
+- Revision-specific review records that invalidate after edits, source updates or expiry.
+- Optional Ollama/Gemini composition adapters; model output can only arrange existing grounded blocks. No mandatory model or paid API.
 - Named editorial review of current, officially fetched operational evidence. Training, stale, superseded, or unverified source packages are blocked.
 - Versioned database migration, durable collection job results, and restart handling for interrupted jobs.
 - Persistent feed health, conditional ETag/Last-Modified caching, bounded retries, and opt-in background polling with saved schedules and failure backoff.
@@ -47,8 +51,10 @@ The developer backend binds to `127.0.0.1:8000`; the renderer uses `127.0.0.1:51
 2. Open Weather Intelligence. Events are ranked by severity, recency, relevance, and verified changes; filters support provider, region/search, and all advisory versions.
 3. Select an event, inspect its evidence verification, **What changed?**, and chronological source timeline. NHC forecasts and watches/warnings retain the original source wording.
 4. Start polling for either source if desired. Intervals of 1–60 minutes and enabled state persist across restarts; polling is paused by default. Pausing stops future polls and lets any current collection finish.
-5. Create a source-linked script, inspect the editorial gate, and export the scene plan. Stale feeds, withdrawn alerts, cancellations, superseded versions, and unverified comparisons cannot pass current-news review.
-6. For offline exploration, load the explicitly labeled training dataset. Archive text imports remain unverified; official archive fetches keep their historical timestamps.
+5. Run AI Newsroom for an advisory and inspect the six JSON handoffs, or create a source-linked script directly from the evidence desk.
+6. Open Script Editor, edit narration and save a named revision. Unmatched edits require a supporting source quotation and named human attestation. Previous approval is cleared; history stays intact.
+7. Record named editorial approval of the latest revision and export its scene plan. Unsupported claims, stale feeds, withdrawn alerts, cancellations, superseded versions, and unverified comparisons cannot pass current-news review.
+8. For offline exploration, load the explicitly labeled training dataset. Archive text imports remain unverified; official archive fetches keep their historical timestamps.
 
 For current reporting, NWS validity uses its actual expiry time and a recent successful feed check, rather than a blanket six-hour cutoff. The source-check limit is the greater of 15 minutes and three configured polling intervals. NHC advisories also retain a six-hour issue-age limit. Polling never starts a render or broadcast.
 
@@ -70,6 +76,8 @@ WETHA_CHROMIUM=/usr/bin/chromium npm run test:ui
 ```
 
 UI tests own both servers, use a fresh temporary database per run, and refuse occupied ports. Tests include captured official NOAA responses with provenance/checksums in `backend/tests/fixtures/`, plus explicitly synthetic edge cases. Provider tests mock HTTP transport; live feed access is validated separately and recorded in [Phase 2 validation](docs/PHASE_2.md).
+
+Optional model configuration and its limitations are described in [Phase 3](docs/PHASE_3.md). Default drafting is local and works without an API key. Live Ollama/Gemini access has not been validated.
 
 ## Storage and configuration
 

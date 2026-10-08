@@ -10,10 +10,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from platformdirs import user_data_dir
-from .contracts import ImportRequest, FetchRequest, ScriptRequest, ReviewRequest, PollingRequest
-from .storage import Store
+from .contracts import ImportRequest, FetchRequest, ScriptRequest, ReviewRequest, PollingRequest, EditRequest, ClaimSupportRequest
+from .storage import Store, RevisionConflict
 from .weather import parse_nhc, nhc_url, fetch_official
-from .newsroom import GroundedScriptWriter
+from .pipeline import Newsroom
+from .editorial import evaluate, edited, attest, legacy_document
+from .models import model_status
 from .fixtures import training_advisories
 from .collector import Collector
 from .intelligence import IntelligenceDesk
@@ -21,7 +23,7 @@ from .intelligence import IntelligenceDesk
 logger = logging.getLogger("wetha")
 
 
-def create_app(data_dir: Path | None = None, source_transport=None) -> FastAPI:
+def create_app(data_dir: Path | None = None, source_transport=None, model_transport=None) -> FastAPI:
     directory = data_dir or Path(os.environ.get("WETHA_DATA_DIR", user_data_dir("WeatherIntelligenceStudio")))
     store = Store(directory / "studio.sqlite3")
 
@@ -30,6 +32,7 @@ def create_app(data_dir: Path | None = None, source_transport=None) -> FastAPI:
         store.initialize()
         collector = Collector(store, source_transport)
         app.state.collector = collector
+        app.state.newsroom = Newsroom(store, collector, model_transport)
         collector.start()
         logger.info(json.dumps({"event":"backend_ready", "database":str(store.path)}))
         try:
@@ -37,7 +40,7 @@ def create_app(data_dir: Path | None = None, source_transport=None) -> FastAPI:
         finally:
             await collector.close()
 
-    app = FastAPI(title="Weather Intelligence Studio", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="Weather Intelligence Studio", version="0.3.0", lifespan=lifespan)
     app.state.store = store
 
     @app.middleware("http")
@@ -58,6 +61,10 @@ def create_app(data_dir: Path | None = None, source_transport=None) -> FastAPI:
     async def missing_record(request, error):
         return JSONResponse({"detail":"Record not found"}, status_code=404)
 
+    @app.exception_handler(RevisionConflict)
+    async def revision_conflict(request, error):
+        return JSONResponse({'detail':str(error)}, status_code=409)
+
     def desk():
         return IntelligenceDesk(store.advisories(), store.feeds(), store.memberships())
 
@@ -68,24 +75,23 @@ def create_app(data_dir: Path | None = None, source_transport=None) -> FastAPI:
         intelligence = intelligence or desk()
         advisory = store.advisory(document["advisory_id"])
         evidence = [store.advisory(identity) for identity in document.get("source_advisory_ids", [advisory.id])]
-        label = intelligence.status(advisory)
-        official = all(item.provenance == "official_fetch" for item in evidence)
-        if label == "current" and not official:
-            label = "unverified"
-        document["label"] = label
-        for check in document["qc"]:
-            if check["check"] == "Source provenance":
-                check["passed"] = official
-            if check["check"] == "Source freshness":
-                check["passed"] = label == "current"
-        return document
+        document = legacy_document(document, evidence)
+        reviews = store.reviews(document['id'])
+        review = next((row for row in reviews if row['revision'] == document['revision']), None)
+        result = evaluate(document, intelligence, evidence, review)
+        result['is_latest'] = document['revision'] == store.script(document['id']).get('revision', 1)
+        if not result['is_latest']:
+            result['editorial']['can_review'] = False
+        result['versions'] = store.versions(document['id'])
+        result['reviews'] = reviews
+        return result
 
     @app.get("/api/health")
     def health():
         store.channel()  # Read persisted state; a live process alone is not readiness.
-        return {"status":"ok", "version":"0.2.0", "database":"connected", "capabilities":{
+        return {"status":"ok", "version":"0.3.0", "database":"connected", "capabilities":{
             "ffmpeg":bool(shutil.which("ffmpeg")), "ffprobe":bool(shutil.which("ffprobe")),
-            "tts":False, "obs":False, "rendering":False, "native_backend_bundle":False}}
+            "newsroom":True, "script_revisions":True, "tts":False, "obs":False, "rendering":False, "native_backend_bundle":False}}
 
     @app.get("/api/dashboard")
     def dashboard():
@@ -95,14 +101,16 @@ def create_app(data_dir: Path | None = None, source_transport=None) -> FastAPI:
         described = intelligence.descriptions()
         current = [a for a in described if a['freshness'] == 'current']
         latest = next((a for a in advisories if a.provenance == "official_fetch"), None)
+        runs = store.runs()
+        last_steps = {step['agent']:step for step in store.run(runs[0]['id'])['steps']} if runs else {}
         return {"channel":store.channel(), "advisories":described, "scripts":[describe_script(s, intelligence) for s in scripts], "jobs":store.jobs(),
             "intelligence":{"feeds":store.feeds(), "events":intelligence.events(), "quarantine":store.quarantine()},
             "stats":{"stored_advisories":len(advisories), "current_alerts":len(current), "scripts":len(scripts), "programs":0},
             "latest_official_issue":latest.issued_at.isoformat() if latest else None,
+            "newsroom":{"runs":runs, "engines":model_status()},
             "broadcast":{"status":"not_configured", "obs_connected":False, "queue":[], "fallback_ready":False},
-            "agents":[{"name":name, "status":status} for name, status in [
-                ("Data collector", "ready"), ("Change detector", "ready"), ("News prioritizer", "ready"),
-                ("Fact verifier", "ready"), ("Scriptwriter", "ready"), ("Editorial controller", "manual")]]}
+            "agents":[{'name':name, 'status':last_steps.get(name, {}).get('status', 'ready')} for name in (
+                'Data collector', 'Change detector', 'News prioritizer', 'Fact verifier', 'Scriptwriter', 'Editorial controller')]}
 
     @app.get("/api/advisories")
     def advisory_list():
@@ -120,7 +128,7 @@ def create_app(data_dir: Path | None = None, source_transport=None) -> FastAPI:
             raise KeyError(identity)
         return {'event':event, 'timeline':[intelligence.describe(intelligence.by_id[item]) for item in event['advisory_ids']]}
 
-    @app.get('/api/advisories/{identity}/evidence')
+    @app.get('/api/advisories/{identity:path}/evidence')
     def original_evidence(identity: str):
         item = store.advisory(identity)
         return {'advisory':describe(item), 'source_payload':item.source_payload, 'checksum':item.checksum}
@@ -179,31 +187,55 @@ def create_app(data_dir: Path | None = None, source_transport=None) -> FastAPI:
         return {"inserted":count, "notice":"Synthetic training data; not real weather observations or broadcast material."}
 
     @app.post("/api/scripts")
-    def generate_script(body: ScriptRequest):
-        advisory = store.advisory(body.advisory_id)
-        intelligence = desk()
-        document = GroundedScriptWriter().generate(advisory, intelligence.previous(advisory), intelligence.status(advisory))
-        store.save_script(document)
-        return document
+    @app.post('/api/newsroom/runs')
+    async def generate_script(body: ScriptRequest):
+        document = await app.state.newsroom.run(body)
+        return describe_script(document)
+
+    @app.get('/api/newsroom')
+    def newsroom_state():
+        return {'runs':store.runs(), 'engines':model_status()}
+
+    @app.get('/api/newsroom/runs/{identity}')
+    def newsroom_run(identity: str):
+        return store.run(identity)
+
+    @app.get('/api/scripts/{identity}')
+    def script_detail(identity: str, revision: int | None = None):
+        return describe_script(store.script(identity, revision))
+
+    def script_evidence(document):
+        return [store.advisory(identity) for identity in document.get('source_advisory_ids', [document['advisory_id']])]
+
+    @app.post('/api/scripts/{identity}/revisions')
+    def revise_script(identity: str, body: EditRequest):
+        def build(document):
+            evidence = script_evidence(document)
+            return edited(legacy_document(document, evidence), body.text, evidence)
+        return describe_script(store.revise(identity, body.expected_revision, body.editor, body.note, build))
+
+    @app.post('/api/scripts/{identity}/claims/support')
+    def support_claim(identity: str, body: ClaimSupportRequest):
+        def build(document):
+            evidence = script_evidence(document)
+            return attest(legacy_document(document, evidence), body, evidence)
+        return describe_script(store.revise(identity, body.expected_revision, body.reviewer, 'Source attestation for ' + body.claim_id, build))
 
     @app.post("/api/scripts/{identity}/review")
     def review_script(identity: str, body: ReviewRequest):
-        document = next((s for s in store.scripts() if s["id"] == identity), None)
-        if not document:
-            raise KeyError(identity)
-        advisory = store.advisory(document["advisory_id"])
-        evaluated = describe_script(document)
-        if evaluated["label"] != "current":
-            raise HTTPException(409, "Only current, officially fetched operational advisories can pass review. Training, unverified and stale reports remain blocked.")
-        result = store.review_script(identity, body.reviewer)
+        def validate(document):
+            evaluated = describe_script(document)
+            if not evaluated['editorial']['can_review']:
+                raise HTTPException(409, 'Only current, officially fetched operational advisories with supported claims can pass review. Training, unverified, stale and unsupported reports remain blocked.')
+            # Save the canonical document; presentation-only history is fetched on demand.
+            return legacy_document(document, script_evidence(document))
+        result = store.review_script(identity, body.reviewer, body.expected_revision, body.note, validate)
         # Editorial review alone is insufficient for broadcast admission.
         return describe_script(result)
 
     @app.get("/api/scripts/{identity}/scenes.csv")
-    def export_scenes(identity: str):
-        document = next((s for s in store.scripts() if s["id"] == identity), None)
-        if not document:
-            raise KeyError(identity)
+    def export_scenes(identity: str, revision: int | None = None):
+        document = store.script(identity, revision)
         buffer = io.StringIO()
         fields = list(document["scenes"][0])
         writer = csv.DictWriter(buffer, fieldnames=fields)

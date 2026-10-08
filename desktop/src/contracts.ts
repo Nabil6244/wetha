@@ -26,7 +26,17 @@ export interface Script {
   source_refs: string[]; estimated_seconds: number; broadcast_eligible: boolean;
   source_issued_at: string; qc: {check: string; passed: boolean}[];
   scenes: {id: string; type: string; target_seconds: number; script_segment: string}[];
+  revision: number; is_latest: boolean; run_id?: string; engine: string; review_valid: boolean;
+  claims: Claim[];
+  evidence_manifest: {id: string; checksum: string; source_url: string; issued_at: string; expires_at: string | null; provenance: string}[];
+  editorial: {issues: {code: string; blocking: boolean; message: string; claim_id?: string}[]; can_review: boolean; high_impact: boolean; timing_basis: string; claim_validation: string};
+  versions: {revision: number; editor: string; note: string; created_at: string}[];
+  reviews: {id: string; revision: number; reviewer: string; note: string; created_at: string}[];
 }
+export interface Claim {id: string; text: string; status: string; source_advisory_ids: string[]; support: {reviewer: string; quote: string; explanation: string; note: string} | null}
+export interface Engine {id: string; name: string; configured: boolean; mode: string}
+export interface NewsroomRun {id: string; advisory_id: string; engine: string; status: string; script_id: string | null; error: string | null; created_at: string}
+export interface RunDetail extends NewsroomRun {steps: {sequence: number; agent: string; status: string; input: unknown; output: unknown; error: string | null; started_at: string; finished_at: string | null}[]}
 export interface Dashboard {
   channel: {name: string; id: string; auto_broadcast: boolean};
   advisories: Advisory[]; scripts: Script[];
@@ -36,5 +46,6 @@ export interface Dashboard {
   agents: {name: string; status: string}[];
   broadcast: {status: string; obs_connected: boolean; fallback_ready: boolean};
   intelligence: Intelligence;
+  newsroom: {runs: NewsroomRun[]; engines: Engine[]};
 }
 export interface Health {status: string; version: string; capabilities: Record<string, boolean>}

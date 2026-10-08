@@ -11,6 +11,10 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class RevisionConflict(Exception):
+    pass
+
+
 class Store:
     def __init__(self, path: Path):
         self.path = path
@@ -39,6 +43,8 @@ class Store:
                     conn.executescript(script)
             conn.execute("UPDATE jobs SET status='failed', detail='Interrupted by backend restart', updated_at=? WHERE status='running'", (now(),))
             conn.execute("UPDATE feeds SET status='failed', last_error='Collection interrupted by backend restart', consecutive_failures=consecutive_failures+1 WHERE status='collecting'")
+            conn.execute("UPDATE newsroom_runs SET status='failed', error='Interrupted by backend restart', updated_at=? WHERE status='running'", (now(),))
+            conn.execute("UPDATE agent_steps SET status='failed', error='Interrupted by backend restart', finished_at=? WHERE status='running'", (now(),))
 
     def save_advisory(self, item: Advisory) -> bool:
         with self.connection() as conn:
@@ -75,23 +81,107 @@ class Store:
     def save_script(self, document: dict):
         with self.connection() as conn:
             conn.execute("INSERT INTO scripts VALUES (?, ?, ?, ?)", (document["id"], document["advisory_id"], json.dumps(document), now()))
+            conn.execute('INSERT INTO script_versions VALUES (?, 1, ?, ?, ?, ?)', (document['id'], json.dumps(document), 'Grounded writer', 'Initial source-backed draft', now()))
 
     def scripts(self) -> list[dict]:
         with self.connection() as conn:
-            return [json.loads(r["document"]) for r in conn.execute("SELECT document FROM scripts ORDER BY created_at DESC")]
+            return [json.loads(r["document"]) for r in conn.execute("SELECT document FROM scripts ORDER BY created_at DESC, id")]
 
-    def review_script(self, identity: str, reviewer: str):
+    def script(self, identity: str, revision: int | None = None) -> dict:
         with self.connection() as conn:
+            if revision is None:
+                row = conn.execute('SELECT document FROM scripts WHERE id=?', (identity,)).fetchone()
+            else:
+                row = conn.execute('SELECT document FROM script_versions WHERE script_id=? AND revision=?', (identity, revision)).fetchone()
+            if not row:
+                raise KeyError(identity)
+            return json.loads(row['document'])
+
+    def versions(self, identity: str) -> list[dict]:
+        self.script(identity)
+        with self.connection() as conn:
+            return [dict(row) for row in conn.execute('SELECT revision, editor, note, created_at FROM script_versions WHERE script_id=? ORDER BY revision DESC', (identity,))]
+
+    def revise(self, identity: str, expected: int, editor: str, note: str, build) -> dict:
+        with self.connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            row = conn.execute('SELECT document FROM scripts WHERE id=?', (identity,)).fetchone()
+            if not row:
+                raise KeyError(identity)
+            current = json.loads(row['document'])
+            if current.get('revision', 1) != expected:
+                raise RevisionConflict('This draft changed. Reload the latest revision before saving.')
+            document = build(current)
+            document.update(revision=expected + 1, editor=editor, revision_note=note, updated_at=now())
+            conn.execute('INSERT INTO script_versions VALUES (?, ?, ?, ?, ?, ?)', (identity, expected+1, json.dumps(document), editor, note, now()))
+            conn.execute('UPDATE scripts SET document=? WHERE id=?', (json.dumps(document), identity))
+            return document
+
+    def reviews(self, identity: str) -> list[dict]:
+        self.script(identity)
+        with self.connection() as conn:
+            rows = [dict(row) for row in conn.execute('SELECT * FROM editorial_reviews WHERE script_id=? ORDER BY created_at DESC, id', (identity,))]
+        for row in rows:
+            row['evidence'] = json.loads(row.pop('evidence_document'))
+        return rows
+
+    def review_script(self, identity: str, reviewer: str, expected: int | None = None, note: str = '', validate=None):
+        with self.connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
             row = conn.execute("SELECT document FROM scripts WHERE id=?", (identity,)).fetchone()
             if not row:
                 raise KeyError(identity)
             document = json.loads(row["document"])
+            revision = document.get('revision', 1)
+            if expected != revision and not (expected is None and revision == 1):
+                raise RevisionConflict('Review must name the latest revision. Reload this draft before approving.')
+            if validate:
+                document = validate(document)
             document.update(status="reviewed", reviewer=reviewer, reviewed_at=now())
             for check in document["qc"]:
                 if check["check"] == "Human editorial review":
                     check["passed"] = True
             conn.execute("UPDATE scripts SET document=? WHERE id=?", (json.dumps(document), identity))
+            conn.execute('INSERT INTO editorial_reviews VALUES (?, ?, ?, ?, ?, ?, ?)', (str(uuid4()), identity, revision, reviewer, note, json.dumps(document.get('evidence_manifest', [])), now()))
             return document
+
+    def start_run(self, advisory_id: str, engine: str) -> str:
+        identity = str(uuid4())
+        with self.connection() as conn:
+            conn.execute("INSERT INTO newsroom_runs VALUES (?, ?, ?, 'running', NULL, NULL, ?, ?)", (identity, advisory_id, engine, now(), now()))
+        return identity
+
+    def start_step(self, identity: str, sequence: int, agent: str, input_document: dict):
+        with self.connection() as conn:
+            conn.execute("INSERT INTO agent_steps VALUES (?, ?, ?, 'running', ?, NULL, NULL, ?, NULL)", (identity, sequence, agent, json.dumps(input_document), now()))
+
+    def finish_step(self, identity: str, sequence: int, output: dict | None = None, error: str | None = None):
+        with self.connection() as conn:
+            conn.execute('UPDATE agent_steps SET status=?, output_document=?, error=?, finished_at=? WHERE run_id=? AND sequence=?', ('failed' if error else 'succeeded', json.dumps(output) if output is not None else None, error, now(), identity, sequence))
+
+    def finish_run(self, identity: str, document: dict | None = None, error: str | None = None):
+        with self.connection() as conn:
+            if document:
+                conn.execute('INSERT INTO scripts VALUES (?, ?, ?, ?)', (document['id'], document['advisory_id'], json.dumps(document), now()))
+                conn.execute('INSERT INTO script_versions VALUES (?, 1, ?, ?, ?, ?)', (document['id'], json.dumps(document), 'Grounded writer', 'Initial newsroom draft', now()))
+            conn.execute('UPDATE newsroom_runs SET status=?, script_id=?, error=?, updated_at=? WHERE id=?', ('failed' if error else 'succeeded', document['id'] if document else None, error, now(), identity))
+
+    def runs(self) -> list[dict]:
+        with self.connection() as conn:
+            return [dict(row) for row in conn.execute('SELECT * FROM newsroom_runs ORDER BY created_at DESC, id LIMIT 30')]
+
+    def run(self, identity: str) -> dict:
+        with self.connection() as conn:
+            row = conn.execute('SELECT * FROM newsroom_runs WHERE id=?', (identity,)).fetchone()
+            if not row:
+                raise KeyError(identity)
+            result = dict(row)
+            result['steps'] = [dict(row) for row in conn.execute('SELECT * FROM agent_steps WHERE run_id=? ORDER BY sequence', (identity,))]
+        for step in result['steps']:
+            step['input'] = json.loads(step.pop('input_document'))
+            output = step.pop('output_document')
+            step['output'] = json.loads(output) if output else None
+        return result
 
     def start_job(self, kind: str) -> str:
         identity = str(uuid4())

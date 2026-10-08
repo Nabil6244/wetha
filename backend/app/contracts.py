@@ -44,11 +44,56 @@ class FetchRequest(BaseModel):
 
 
 class ScriptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     advisory_id: str
+    engine: Literal['deterministic', 'ollama', 'gemini'] = 'deterministic'
+    refresh_sources: bool = False
 
 
 class ReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     reviewer: str = Field(min_length=2, max_length=100)
+    expected_revision: int | None = Field(default=None, ge=1)
+    note: str = Field(default='', max_length=2000)
+
+    @field_validator('reviewer')
+    @classmethod
+    def named(cls, value):
+        if len(value.strip()) < 2:
+            raise ValueError('A reviewer name is required.')
+        return value.strip()
+
+
+class EditRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_revision: int = Field(ge=1)
+    text: str = Field(min_length=50, max_length=60_000)
+    editor: str = Field(min_length=2, max_length=100)
+    note: str = Field(min_length=3, max_length=2000)
+
+    @field_validator('editor', 'note')
+    @classmethod
+    def not_blank(cls, value):
+        if len(value.strip()) < 2:
+            raise ValueError('An editor name and revision note are required.')
+        return value.strip()
+
+
+class ClaimSupportRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_revision: int = Field(ge=1)
+    claim_id: str
+    advisory_id: str
+    quote: str = Field(min_length=20, max_length=15_000)
+    explanation: str = Field(min_length=10, max_length=2000)
+    reviewer: str = Field(min_length=2, max_length=100)
+
+    @field_validator('reviewer', 'explanation')
+    @classmethod
+    def not_blank(cls, value):
+        if len(value.strip()) < 2:
+            raise ValueError('Named source verification and an explanation are required.')
+        return value.strip()
 
 
 class Change(BaseModel):

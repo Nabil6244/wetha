@@ -1,4 +1,4 @@
-# Application foundation and Phase 2 weather intelligence
+# Application foundation, weather intelligence and Phase 3 newsroom
 
 ```text
 desktop/
@@ -14,7 +14,10 @@ backend/
   app/transport.py       Bounded HTTPS reads and durable conditional cache
   app/collector.py       Owned background polling and coalesced collections
   app/intelligence.py    CAP event grouping, live verification and priority
-  app/newsroom.py        Deterministic writing and pluggable interfaces
+  app/newsroom.py        Source-backed narration and pluggable media interfaces
+  app/pipeline.py        Six roles with typed JSON handoffs and durable runs
+  app/editorial.py       Claim tracking, quote attestations and review evaluation
+  app/models.py          Constrained optional Ollama/Gemini composition
   app/storage.py         SQLite transactions, migrations, durable jobs
   app/main.py            API, local-origin guard, static renderer serving
   app/fixtures.py        Explicit synthetic offline training data
@@ -42,6 +45,9 @@ SQLite connections enable foreign keys and use WAL with a 15-second busy timeout
 | `feed_members` | Current IDs from a successfully completed provider refresh |
 | `rejected_evidence` | Original invalid/conflicting payloads, reasons, first/last observation, resolution timestamp |
 | `news_events` | Rebuilt event projections and priority; immutable advisories remain authoritative |
+| `newsroom_runs` / `agent_steps` | Run identity/status and ordered versioned JSON handoffs, timestamps and errors |
+| `script_versions` | Immutable narration revisions with editor/note/time and source manifests |
+| `editorial_reviews` | Exact revision, reviewer, note/time and evidence reviewed |
 
 Future voiceovers, licensed assets, render outputs, and broadcast history receive their own migrations. They are not represented by fabricated records in this milestone. Rendering and broadcasting will run independently; this milestone starts neither process.
 
@@ -49,7 +55,7 @@ Future voiceovers, licensed assets, render outputs, and broadcast history receiv
 
 Pydantic `Advisory` preserves provider, source URL, issue and expiry times, provenance, severity, text, and extracted facts with units in their keys. Timezones are mandatory and normalized to UTC. NHC import checks include source domain/path identity, wind-unit consistency, geographic limits, central pressure bounds, and future timestamps. Manual imports remain unverified even if their URL is official.
 
-Provider, scriptwriter, voice, renderer, and broadcast interfaces are Python protocols. Only the provider and deterministic scriptwriter have implementations. They can be replaced without changing advisory storage or renderer contracts.
+Provider, scriptwriter, voice, renderer, and broadcast interfaces are Python protocols. Providers, the six newsroom roles and optional constrained composition adapters have implementations. Voice, rendering and broadcasting remain interfaces. They can be replaced without changing advisory storage or renderer contracts.
 
 | API | Purpose |
 |---|---|
@@ -86,7 +92,8 @@ Live NWS and NHC RSS collection has been validated in this instance. The tested 
 
 ## Next milestones
 
-1. Phase 3 newsroom: human-editable, versioned scripts with claim-level verification, structured agent orchestration, and optional Gemini/local model adapters.
+1. Phase 4 visuals: real geographic maps, observed GOES/radar layers, camera motion and source timestamps.
+   Phase 3 is implemented; see [its source/claim/model contracts and validation](PHASE_3.md).
 2. Additional historical hurricane fixtures once archive access is available; deeper geographic priority rules and source-specific correlation.
 3. MapLibre, timestamped GOES/radar layers, licensed local media, and visual evidence timelines.
 4. Verified local TTS, alignment, FFmpeg rendering, media quality checks, and 30-second then five-minute outputs.

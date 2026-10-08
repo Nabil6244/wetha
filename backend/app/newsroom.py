@@ -58,6 +58,15 @@ class GroundedScriptWriter:
                 lines.append("No changes were detected in the extracted measurements.")
             paragraphs.append(" ".join(lines))
         paragraphs.append("Follow official local guidance. This draft does not add a forecast, storm track, or impacts beyond the source information.")
+        if advisory.provider == 'NHC':
+            context = []
+            if advisory.warnings:
+                context.append('Official watch and warning coverage:\n' + '\n'.join(advisory.warnings))
+            if advisory.forecast_excerpt:
+                context.append('Official forecast guidance, quoted from this advisory:\n' + advisory.forecast_excerpt)
+            else:
+                context.append('Forecast guidance was not extracted from this source package. Consult the complete official advisory before reporting a prediction.')
+            paragraphs[-1:-1] = context
         source_refs = [advisory.source_url] + ([previous.source_url] if previous else [])
         text = "\n\n".join(paragraphs)
         return {"id":str(uuid4()), "advisory_id":advisory.id, "source_advisory_ids":[advisory.id] + ([previous.id] if previous else []), "title":advisory.title, "text":text, "status":"needs_review", "source_refs":source_refs,
