@@ -1,0 +1,76 @@
+{
+  "name": "weather-intelligence-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Official weather intelligence and broadcast production workspace",
+  "main": "desktop/electron/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.cjs",
+    "dev:api": "node scripts/backend.cjs",
+    "dev:ui": "vite --host 127.0.0.1",
+    "desktop": "npm run build && electron .",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "test": "node scripts/backend.cjs test",
+    "test:ui": "playwright test",
+    "package:dir": "node scripts/check-runtime.cjs && npm run build && electron-builder --dir",
+    "package:win": "node scripts/check-runtime.cjs win32 && npm run build && electron-builder --win nsis --x64",
+    "package:mac": "node scripts/check-runtime.cjs darwin && npm run build && electron-builder --mac dmg"
+  },
+  "dependencies": {
+    "lucide-react": "1.52.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.3"
+  },
+  "build": {
+    "appId": "studio.weatherintelligence.desktop",
+    "productName": "Weather Intelligence Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "desktop/electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend",
+        "filter": [
+          "app/**",
+          "migrations/**",
+          "requirements.lock"
+        ]
+      },
+      {
+        "from": "dist",
+        "to": "ui"
+      },
+      {
+        "from": "backend-runtime",
+        "to": "backend-runtime"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.weather"
+    }
+  }
+}
