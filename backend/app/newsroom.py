@@ -22,8 +22,8 @@ class BroadcastController(Protocol):
 
 class GroundedScriptWriter:
     """Deterministic source-to-script baseline; no invented forecasts or LLM dependencies."""
-    def generate(self, advisory: Advisory, previous: Advisory | None) -> dict:
-        label = freshness(advisory)
+    def generate(self, advisory: Advisory, previous: Advisory | None, source_status: str | None = None) -> dict:
+        label = source_status or freshness(advisory)
         if label == "current" and previous and previous.provenance != "official_fetch":
             label = "unverified"
         stamp = advisory.issued_at.strftime("%B %d, %Y at %H:%M UTC")
@@ -32,6 +32,11 @@ class GroundedScriptWriter:
             "expired":"EXPIRED ADVISORY. This warning is no longer valid.",
             "unverified":"UNVERIFIED IMPORT. Confirm every fact against the original advisory.",
             "non-operational":"NON-OPERATIONAL ALERT. This may be a test or a cancellation; do not air as an active warning.",
+            "cancelled":"CANCELLED ALERT. The official source has cancelled this alert.",
+            "superseded":"SUPERSEDED ADVISORY. A newer version replaces this evidence; do not air as current.",
+            "stale_feed":"STALE SOURCE CHECK. The source feed has not been successfully verified recently.",
+            "not_active":"NOT IN ACTIVE FEED. The advisory is absent from the latest successfully collected active feed.",
+            "conflicting":"CONFLICTING EVIDENCE. Competing versions require investigation before reporting.",
             "current":"PRERECORDED REPORT. Recheck the official advisory before broadcast."}[label]
         paragraphs = [warning, f"According to {'the National Hurricane Center' if advisory.provider == 'NHC' else 'the National Weather Service' if advisory.provider == 'NWS' else 'the synthetic training dataset'}, {advisory.title} was issued on {stamp}."]
         if "wind_mph" in advisory.facts:
@@ -44,6 +49,9 @@ class GroundedScriptWriter:
             readable = {"wind_mph": ("maximum sustained winds", "mph"), "pressure_mb": ("central pressure", "mb"), "latitude": ("latitude", "degrees"), "longitude": ("longitude", "degrees")}
             lines = [f"Compared with the advisory issued at {previous.issued_at.strftime('%H:%M UTC on %B %d, %Y')}:"]
             for change in difference:
+                if change.field in ('description', 'instruction', 'forecast_guidance'):
+                    lines.append(f"Official {change.field.replace('_', ' ')} wording was updated. Review the complete source text for context.")
+                    continue
                 name, units = readable.get(change.field, (change.field.replace('_', ' '), ""))
                 lines.append(f"{name.capitalize()} changed from {change.previous} to {change.current} {units}.")
             if not difference:

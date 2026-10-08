@@ -1,0 +1,25 @@
+{
+  "captured_at": "2026-10-08T02:26:55Z",
+  "files": [
+    {
+      "file": "nhc-atlantic-2026-10-08.xml",
+      "source_url": "https://www.nhc.noaa.gov/index-at.xml",
+      "sha256": "b296aa9adf705c25c5355e66001dff43f11fcee4c1c325b21528adc1bdb5712e",
+      "selection": "Unmodified complete RSS response"
+    },
+    {
+      "file": "nws-alerts-2026-10-08.json",
+      "source_url": "https://api.weather.gov/alerts/active",
+      "sha256": "f17a97e57c5df5c874a40186e33a7fc252f86981c95e7b3b7ddac02d57212e73",
+      "selection": "Subset of unmodified complete alert features; collection wrapper reduced for reproducible tests",
+      "original_alert_count": 401
+    },
+    {
+      "file": "nhc-atlantic-2026-10-08-0300.xml",
+      "source_url": "https://www.nhc.noaa.gov/index-at.xml",
+      "sha256": "9dfeaa98d05694f02a6f211871b27e2165ae72e8e2553c8c7f5ac2d0fe85a71a",
+      "captured_at": "2026-10-08T02:56:47.301243+00:00",
+      "selection": "Unmodified complete RSS response retained in the integrity-checked official HTTP cache"
+    }
+  ]
+}

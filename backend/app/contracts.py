@@ -18,6 +18,11 @@ class Advisory(BaseModel):
     facts: dict[str, str | float | int | None] = Field(default_factory=dict)
     text: str
     checksum: str = ""
+    references: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    forecast_excerpt: str | None = None
+    source_feed_url: str | None = None
+    source_payload: dict | None = None
 
     @field_validator("issued_at", "expires_at")
     @classmethod
@@ -51,3 +56,9 @@ class Change(BaseModel):
     previous: str | float | int | None
     current: str | float | int | None
     delta: float | None = None
+
+
+class PollingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+    interval_seconds: int = Field(default=300, ge=60, le=3600)

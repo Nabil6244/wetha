@@ -152,7 +152,7 @@ def test_review_checks_current_time_and_superseding_evidence(client):
 def test_unverified_comparison_blocks_current_draft_review(client):
     store = client.app.state.store
     previous, latest = training_advisories()
-    previous = previous.model_copy(update={"provenance":"manual_import", "issued_at":datetime.now(timezone.utc) - timedelta(hours=1)})
+    previous = previous.model_copy(update={"provider":"NHC", "provenance":"manual_import", "issued_at":datetime.now(timezone.utc) - timedelta(hours=1)})
     latest = latest.model_copy(update={"provider":"NHC", "provenance":"official_fetch", "issued_at":datetime.now(timezone.utc)})
     store.save_advisory(previous); store.save_advisory(latest)
     script = client.post("/api/scripts", json={"advisory_id":latest.id}).json()
