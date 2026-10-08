@@ -1,4 +1,4 @@
-# Application foundation, weather intelligence and Phase 3 newsroom
+# Application foundation, weather intelligence and Phase 4 visuals
 
 ```text
 desktop/
@@ -17,6 +17,8 @@ backend/
   app/newsroom.py        Source-backed narration and pluggable media interfaces
   app/pipeline.py        Six roles with typed JSON handoffs and durable runs
   app/editorial.py       Claim tracking, quote attestations and review evaluation
+  app/visuals.py         Official visual caches, geography and scene direction
+  app/data/             Public-domain basemap and provenance
   app/models.py          Constrained optional Ollama/Gemini composition
   app/storage.py         SQLite transactions, migrations, durable jobs
   app/main.py            API, local-origin guard, static renderer serving
@@ -92,7 +94,8 @@ Live NWS and NHC RSS collection has been validated in this instance. The tested 
 
 ## Next milestones
 
-1. Phase 4 visuals: real geographic maps, observed GOES/radar layers, camera motion and source timestamps.
+1. Phase 5 production: verified local voiceover, licensed media, actual timing and FFmpeg scene rendering.
+   Phase 4 maps/directing are implemented; live imagery access and cone-format validation have explicit limits in [Phase 4](PHASE_4.md).
    Phase 3 is implemented; see [its source/claim/model contracts and validation](PHASE_3.md).
 2. Additional historical hurricane fixtures once archive access is available; deeper geographic priority rules and source-specific correlation.
 3. MapLibre, timestamped GOES/radar layers, licensed local media, and visual evidence timelines.

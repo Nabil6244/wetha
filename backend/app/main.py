@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from platformdirs import user_data_dir
-from .contracts import ImportRequest, FetchRequest, ScriptRequest, ReviewRequest, PollingRequest, EditRequest, ClaimSupportRequest
+from .contracts import ImportRequest, FetchRequest, ScriptRequest, ReviewRequest, PollingRequest, EditRequest, ClaimSupportRequest, VisualPlanRequest, SceneImportRequest
 from .storage import Store, RevisionConflict
 from .weather import parse_nhc, nhc_url, fetch_official
 from .pipeline import Newsroom
@@ -19,11 +19,12 @@ from .models import model_status
 from .fixtures import training_advisories
 from .collector import Collector
 from .intelligence import IntelligenceDesk
+from .visuals import VisualEvidence
 
 logger = logging.getLogger("wetha")
 
 
-def create_app(data_dir: Path | None = None, source_transport=None, model_transport=None) -> FastAPI:
+def create_app(data_dir: Path | None = None, source_transport=None, model_transport=None, visual_transport=None) -> FastAPI:
     directory = data_dir or Path(os.environ.get("WETHA_DATA_DIR", user_data_dir("WeatherIntelligenceStudio")))
     store = Store(directory / "studio.sqlite3")
 
@@ -33,14 +34,16 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         collector = Collector(store, source_transport)
         app.state.collector = collector
         app.state.newsroom = Newsroom(store, collector, model_transport)
+        app.state.visuals = VisualEvidence(store, visual_transport)
         collector.start()
         logger.info(json.dumps({"event":"backend_ready", "database":str(store.path)}))
         try:
             yield
         finally:
+            await app.state.visuals.close()
             await collector.close()
 
-    app = FastAPI(title="Weather Intelligence Studio", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="Weather Intelligence Studio", version="0.4.0", lifespan=lifespan)
     app.state.store = store
 
     @app.middleware("http")
@@ -89,9 +92,9 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
     @app.get("/api/health")
     def health():
         store.channel()  # Read persisted state; a live process alone is not readiness.
-        return {"status":"ok", "version":"0.3.0", "database":"connected", "capabilities":{
+        return {"status":"ok", "version":"0.4.0", "database":"connected", "capabilities":{
             "ffmpeg":bool(shutil.which("ffmpeg")), "ffprobe":bool(shutil.which("ffprobe")),
-            "newsroom":True, "script_revisions":True, "tts":False, "obs":False, "rendering":False, "native_backend_bundle":False}}
+            "newsroom":True, "script_revisions":True, "visual_director":True, "tts":False, "obs":False, "rendering":False, "native_backend_bundle":False}}
 
     @app.get("/api/dashboard")
     def dashboard():
@@ -245,6 +248,70 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
             # Escape spreadsheet formula prefixes for imported source text.
             writer.writerow({key:("'" + value if isinstance(value, str) and value.startswith(("=", "+", "-", "@")) else value) for key, value in values.items()})
         return Response(buffer.getvalue(), media_type="text/csv", headers={"Content-Disposition":'attachment; filename="scene-plan.csv"'})
+
+    def evaluate_plan(document):
+        script = describe_script(store.script(document['script_id']))
+        document['current_source_label'] = script['label']
+        document['superseded_script_revision'] = script['revision'] != document['script_revision']
+        document['review_valid_now'] = script['review_valid'] and not document['superseded_script_revision']
+        return document
+
+    @app.get('/api/visuals')
+    def visual_state():
+        result = app.state.visuals.state()
+        result['plans'] = [evaluate_plan(plan) for plan in result['plans']]
+        return result
+
+    @app.get('/api/visuals/basemap')
+    def basemap():
+        file = Path(__file__).parent / 'data/countries.geojson'
+        return Response(file.read_bytes(), media_type='application/geo+json')
+
+    @app.get('/api/visuals/geography/{identity:path}')
+    def visual_geography(identity: str):
+        return app.state.visuals.geography(identity)
+
+    @app.get('/api/visuals/assets/{identity}')
+    def visual_asset(identity: str):
+        row = app.state.visuals.asset(identity)
+        return Response(row['body'], media_type=row['content_type'], headers={'ETag':'"' + row['checksum'] + '"','Cache-Control':'private, max-age=31536000, immutable','X-Content-Type-Options':'nosniff'})
+
+    @app.post('/api/visuals/sources/{identity}/refresh')
+    async def collect_visuals(identity: str):
+        if identity not in ('goes','radar'):
+            raise KeyError(identity)
+        return await app.state.visuals.collect(identity)
+
+    @app.post('/api/visuals/forecast-cone')
+    async def collect_forecast(body: ScriptRequest):
+        return await app.state.visuals.collect('forecast_cone', body.advisory_id)
+
+    @app.post('/api/visuals/plans')
+    def visual_plan(body: VisualPlanRequest):
+        # Plans retain this immutable version; a later edit marks the plan superseded.
+        script = describe_script(store.script(body.script_id))
+        if script['revision'] != body.expected_revision:
+            raise RevisionConflict('The script changed. Reload its latest revision before directing scenes.')
+        return evaluate_plan(app.state.visuals.plan(script, body.style))
+
+    @app.get('/api/visuals/plans/{identity}')
+    def plan_detail(identity: str):
+        return evaluate_plan(store.visual_plan(identity))
+
+    @app.get('/api/visuals/plans/{identity}/scenes.csv')
+    def plan_csv(identity: str):
+        document = store.visual_plan(identity)
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=list(document['scenes'][0]))
+        writer.writeheader()
+        for scene in document['scenes']:
+            values = {key:json.dumps(value) if isinstance(value,(dict,list)) else '' if value is None else value for key,value in scene.items()}
+            writer.writerow({key:("'"+value if isinstance(value,str) and value.lstrip().startswith(('=','+','-','@')) else value) for key,value in values.items()})
+        return Response(buffer.getvalue(), media_type='text/csv', headers={'Content-Disposition':'attachment; filename="visual-scenes.csv"'})
+
+    @app.post('/api/visuals/plans/{identity}/import')
+    def import_scene_plan(identity: str, body: SceneImportRequest):
+        return evaluate_plan(app.state.visuals.import_scenes(store.visual_plan(identity),body.csv_text))
 
     static = Path(os.environ.get("WETHA_UI_DIR", Path(__file__).resolve().parents[2] / "dist"))
     if static.is_dir():

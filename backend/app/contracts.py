@@ -107,3 +107,15 @@ class PollingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool
     interval_seconds: int = Field(default=300, ge=60, le=3600)
+
+
+class VisualPlanRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    script_id: str
+    expected_revision: int = Field(ge=1)
+    style: Literal['map','satellite','radar'] = 'map'
+
+
+class SceneImportRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    csv_text: str = Field(min_length=100, max_length=500_000)

@@ -1,6 +1,6 @@
 {
   "name": "weather-intelligence-studio",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Official weather intelligence and broadcast production workspace",
@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "lucide-react": "1.52.0",
+    "maplibre-gl": "6.13.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

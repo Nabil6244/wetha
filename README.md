@@ -1,6 +1,6 @@
 # Weather Intelligence Studio
 
-A standalone Electron + React + TypeScript application with a local Python/FastAPI service and versioned SQLite storage. **Phase 3 adds a recorded six-role newsroom, versioned script editor and claim review** to the official weather intelligence pipeline. This is not a production broadcasting system.
+A standalone Electron + React + TypeScript application with a local Python/FastAPI service and versioned SQLite storage. **Phase 4 adds geographic previews, advisory visualizations and revision-bound scene direction** to the official weather intelligence pipeline. This is not a production broadcasting system.
 
 The initial channel is **US Extreme Weather**. No paid API or existing Semantic YT Studio installation is required.
 
@@ -20,9 +20,12 @@ The initial channel is **US Extreme Weather**. No paid API or existing Semantic 
 - Persistent feed health, conditional ETag/Last-Modified caching, bounded retries, and opt-in background polling with saved schedules and failure backoff.
 - Linked NWS updates/cancellations, active-feed withdrawal checks, immutable evidence quarantine, and event timelines.
 - Deterministic editorial priority, explicit verification checks, original forecast wording, and watch/warning comparisons.
+- Local MapLibre country map, official advisory centers/polygons, eased camera controls and animated What Changed graphics.
+- Timestamped GOES/radar adapters and conservative NHC cone parsing, with verified local media caching and explicit source failures. Live GOES and nowCOAST collection and playback were verified; NHC forecast-cone downloads still return HTTP 403.
+- Revision-bound visual plans with presentation-only scene CSV import/export.
 - Electron backend ownership, loopback-only access, readiness checks, isolated renderer, and process cleanup.
 
-No draft is broadcast eligible. TTS, maps/satellite animation, media import, video rendering, OBS automation, and 60-minute programs are later phases. Their screens explicitly show this state. The synthetic training dataset is never presented as real observations.
+No draft is broadcast eligible. TTS, stock-media import, video rendering, OBS automation, and 60-minute programs are later phases. Satellite/radar views require successful collection and explicitly show unavailable observations or source failures. The synthetic training dataset is never presented as real observations.
 
 ## Develop
 
@@ -54,11 +57,12 @@ The developer backend binds to `127.0.0.1:8000`; the renderer uses `127.0.0.1:51
 5. Run AI Newsroom for an advisory and inspect the six JSON handoffs, or create a source-linked script directly from the evidence desk.
 6. Open Script Editor, edit narration and save a named revision. Unmatched edits require a supporting source quotation and named human attestation. Previous approval is cleared; history stays intact.
 7. Record named editorial approval of the latest revision and export its scene plan. Unsupported claims, stale feeds, withdrawn alerts, cancellations, superseded versions, and unverified comparisons cannot pass current-news review.
-8. For offline exploration, load the explicitly labeled training dataset. Archive text imports remain unverified; official archive fetches keep their historical timestamps.
+8. Open Visual Director to inspect actual geographic evidence, compare advisory measurements, and direct scenes from a pinned script revision. Collect satellite/radar observations manually; source failures preserve cached evidence.
+9. For offline exploration, load the explicitly labeled training dataset. Archive text imports remain unverified; official archive fetches keep their historical timestamps.
 
 For current reporting, NWS validity uses its actual expiry time and a recent successful feed check, rather than a blanket six-hour cutoff. The source-check limit is the greater of 15 minutes and three configured polling intervals. NHC advisories also retain a six-hour issue-age limit. Polling never starts a render or broadcast.
 
-Required destinations: `api.weather.gov`, `www.nhc.noaa.gov`; future satellite work also needs `www.star.nesdis.noaa.gov`. Official source requests have bounded retries and do not follow redirects to unapproved domains.
+Required destinations: `api.weather.gov`, `www.nhc.noaa.gov`; visual observation collection also needs `www.star.nesdis.noaa.gov`, `cdn.star.nesdis.noaa.gov`, and `nowcoast.noaa.gov`. Official source requests have bounded retries and do not follow redirects to unapproved domains.
 
 ## Validate
 
@@ -77,7 +81,7 @@ WETHA_CHROMIUM=/usr/bin/chromium npm run test:ui
 
 UI tests own both servers, use a fresh temporary database per run, and refuse occupied ports. Tests include captured official NOAA responses with provenance/checksums in `backend/tests/fixtures/`, plus explicitly synthetic edge cases. Provider tests mock HTTP transport; live feed access is validated separately and recorded in [Phase 2 validation](docs/PHASE_2.md).
 
-Optional model configuration and its limitations are described in [Phase 3](docs/PHASE_3.md). Default drafting is local and works without an API key. Live Ollama/Gemini access has not been validated.
+See [Phase 4](docs/PHASE_4.md) for source projection, timestamp, map resolution and current access limits. Optional model configuration and its limitations are described in [Phase 3](docs/PHASE_3.md). Default drafting is local and works without an API key. Live Ollama/Gemini access has not been validated.
 
 ## Storage and configuration
 

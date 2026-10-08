@@ -271,3 +271,59 @@ class Store:
         with self.connection() as conn:
             conn.execute('DELETE FROM news_events')
             conn.executemany('INSERT INTO news_events VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET document=excluded.document, updated_at=excluded.updated_at', [(event['id'], json.dumps(event), now()) for event in events])
+
+    def visual_assets(self, kind: str | None = None) -> list[dict]:
+        with self.connection() as conn:
+            rows = conn.execute('SELECT id, kind, source_url, observed_at, content_type, checksum, document, fetched_at FROM visual_assets WHERE (? IS NULL OR kind=?) ORDER BY observed_at DESC, id LIMIT 120', (kind, kind))
+            return [{**dict(row), 'metadata':json.loads(row['document'])} for row in rows]
+
+    def visual_asset(self, identity: str) -> dict:
+        with self.connection() as conn:
+            row = conn.execute('SELECT * FROM visual_assets WHERE id=?', (identity,)).fetchone()
+            if not row:
+                raise KeyError(identity)
+            return dict(row)
+
+    def save_visual_asset(self, document: dict, body: bytes):
+        import hashlib
+        digest = hashlib.sha256(body).hexdigest()
+        identity = hashlib.sha256((document['source_url'] + digest).encode()).hexdigest()
+        with self.connection() as conn:
+            old = conn.execute('SELECT checksum FROM visual_assets WHERE source_url=?', (document['source_url'],)).fetchone()
+            if old and old['checksum'] != digest:
+                raise ValueError('Dated visual evidence changed at the same URL; preserving the original cached asset.')
+            conn.execute('INSERT OR IGNORE INTO visual_assets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', (identity, document['kind'], document['source_url'], document['observed_at'], document['content_type'], body, digest, json.dumps(document['metadata']), now()))
+            # Bound retained media to 120 assets and 256 MB, preserving any plan-referenced assets.
+            pinned = set()
+            for row in conn.execute('SELECT document FROM visual_plans'):
+                pinned.update(json.loads(row['document']).get('asset_ids', []))
+            rows = list(conn.execute('SELECT id, length(body) AS bytes FROM visual_assets ORDER BY observed_at DESC, id'))
+            total = 0
+            for index, row in enumerate(rows):
+                total += row['bytes']
+                if (index >= 120 or total > 256_000_000) and row['id'] not in pinned:
+                    conn.execute('DELETE FROM visual_assets WHERE id=?', (row['id'],))
+        return identity
+
+    def visual_source_status(self, identity: str, status: str, error: str | None = None):
+        with self.connection() as conn:
+            conn.execute('UPDATE visual_sources SET status=?, checked_at=?, last_error=? WHERE id=?', (status, now(), error, identity))
+
+    def visual_sources(self) -> list[dict]:
+        with self.connection() as conn:
+            return [dict(row) for row in conn.execute('SELECT * FROM visual_sources ORDER BY id')]
+
+    def save_visual_plan(self, document: dict):
+        with self.connection() as conn:
+            conn.execute('INSERT INTO visual_plans VALUES (?, ?, ?, ?, ?)', (document['id'], document['script_id'], document['script_revision'], json.dumps(document), now()))
+
+    def visual_plans(self) -> list[dict]:
+        with self.connection() as conn:
+            return [json.loads(row['document']) for row in conn.execute('SELECT document FROM visual_plans ORDER BY created_at DESC LIMIT 30')]
+
+    def visual_plan(self, identity: str) -> dict:
+        with self.connection() as conn:
+            row = conn.execute('SELECT document FROM visual_plans WHERE id=?', (identity,)).fetchone()
+            if not row:
+                raise KeyError(identity)
+            return json.loads(row['document'])

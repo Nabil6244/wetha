@@ -25,3 +25,7 @@ The cloud's FFmpeg 7.1.5 build enables GPL components including x264. It is curr
 Official weather text and government-produced observations require attribution and timestamp preservation. Do not assume that every NOAA-hosted image, third-party contribution, logo, or linked asset is public domain. Asset-level rights records are required before media use. No YouTube footage or external stock media is downloaded in Phase 1.
 
 The project is private in package metadata; no open-source license for the application itself has been chosen by the owner.
+
+## Phase 4 geographic dependencies
+
+MapLibre GL JS 6.13.0 is BSD-3-Clause licensed and pinned in the npm lockfile. Natural Earth 1:110m country geometry is public domain; its source, transformation and content checksums are in `backend/app/data/provenance.json`. NOAA/NESDIS/STAR and NOAA nowCOAST visual products retain source URLs, timestamps and attribution. Availability does not override product-specific licensing/credit terms. No private tiles, paid map service or third-party ground footage is bundled.

@@ -20,6 +20,13 @@
       "sha256": "9dfeaa98d05694f02a6f211871b27e2165ae72e8e2553c8c7f5ac2d0fe85a71a",
       "captured_at": "2026-10-08T02:56:47.301243+00:00",
       "selection": "Unmodified complete RSS response retained in the integrity-checked official HTTP cache"
+    },
+    {
+      "file": "goes19-gulf-atlantic-2026-10-08.html",
+      "source_url": "https://www.star.nesdis.noaa.gov/GOES/sector_band.php?sat=G19&sector=ga&band=GEOCOLOR&length=12",
+      "sha256": "f8a0e78e4f6ea8fb58107c2e9030100815b77527ea3c396cd35b1d2ec5450958",
+      "note": "Complete official HTML product catalogue; image CDN bodies were blocked and are not included.",
+      "captured_on": "2026-10-08"
     }
   ]
 }
