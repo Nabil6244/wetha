@@ -29,7 +29,7 @@ def overlay(image,row,t):
     image=Image.alpha_composite(image.convert('RGBA'),wash).convert('RGB');d=ImageDraw.Draw(image)
     label(d,(55,35),row.get('header','ISAIAS / AUGUST 2020'),24,'#ffffff')
     label(d,(1230,35),row['context'],24,'#ffffff')
-    x=55+round(35*(1-easing(min(1,t*3))))
+    x=55 if row.get('static_title') else 55+round(35*(1-easing(min(1,t*3))))
     lines=textwrap.wrap(row['text'],width=51)
     if len(lines)>2:raise ValueError('Documentary caption exceeds two lines.')
     for i,line in enumerate(lines):

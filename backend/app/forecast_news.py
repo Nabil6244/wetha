@@ -96,6 +96,7 @@ def active_alerts(payload,now):
 def snapshot_status(manifest,now):
     collected=stamp(manifest['collected_at']);refresh=stamp(manifest['refresh_after'])
     return {'available':True,'title':manifest['title'],'seconds':manifest.get('output',{}).get('seconds'),
+            'visual_revision':manifest.get('visual_revision',1),'visual_audit':manifest.get('visual_audit'),
             'collected_at':collected.isoformat(),'refresh_after':refresh.isoformat(),
             'status':'refresh_needed' if now>=refresh else 'recent_snapshot',
             'note':'Recorded forecast bulletin. Recollect sources before publishing; this video does not update automatically.'}

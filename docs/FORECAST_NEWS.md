@@ -30,6 +30,27 @@ The app marks a recording as needing refresh 30 minutes after collection. This s
 
 `.local/exports/forecast-news/florida-forecast-bulletin.mp4`, `manifest.json`, `script.txt`, `captions.srt`, `narration.wav`, `contact.jpg` and `qc.log`.
 
-The movie uses 48 short shots at 1080p/30 fps. Graphic movement reveals supplied source values and changes the camera; it is not simulated radar or a synthetic weather field. Six location-reviewed Florida recordings provide distinct illustrative trims. New Northwest Florida sources are Pexels 31040646 (Jabriel, Panama City Beach, source description) and 2425846 (Ruvim M, Panama City Beach, source location tag and matching visible beachfront). Existing Miami and West Palm footage appears as regional illustration. All footage is labeled illustrative, with unknown capture date, rather than current conditions.
+The revised movie uses 36 shots at 1080p/30 fps, lasting about 3 minutes 8 seconds. Each of the 28 graphic treatments appears once; eight distinct 3.5-second footage trims are disjoint. Twenty-one statistical and explanatory designs replace the repeated city-list maps: rain ranking and contrast, a 48-cell forecast-hour heatmap, wind ranges and rankings, compass directions, thermal dials, regional rainfall and conditional surge scales, alert-record counts and source clocks. Graphic movement reveals supplied source values and changes the camera; it is not simulated radar or a synthetic weather field. Six location-reviewed Florida recordings provide distinct illustrative trims. New Northwest Florida sources are Pexels 31040646 (Jabriel, Panama City Beach, source description) and 2425846 (Ruvim M, Panama City Beach, source location tag and matching visible beachfront). Existing Miami and West Palm footage appears as regional illustration. All footage is labeled illustrative, with unknown capture date, rather than current conditions.
 
 The renderer verifies source checksums, source hours and units, footage ranges, per-shot and total frame counts, final picture duration, full decoding and sustained black frames. Captions use approximate sentence timing within measured narration paragraphs.
+
+## Visual revision and archived review
+
+Revision 2 adds the storm's sourced pressure and forward speed, an explicitly derived
+percentage-point rain-chance comparison, all eight local point forecasts at six
+valid-hour checkpoints, and active alert-record counts. Record counts may overlap
+and are never presented as counts of people, cities or unique covered areas.
+Graphical reveals happen once per shot; the plan rejects repeated graphic kinds.
+Forecast matrices contain discrete supplied values, rather than interpolated fields
+or comparisons with a newer edition. Every shot retains source times and units.
+
+To revise this **recorded edition** without relabeling it as current, use
+`.venv/bin/python scripts/render-forecast-news.py --archived-review`. This explicit
+review mode preserves the old collection date and marks the export as archived
+review. The normal command still rejects an expired snapshot. This exception is
+for editing the recording, not publishing it as a new weather update.
+
+The manifest includes `visual_audit` and `statistical_summary`. Shot cache keys
+include source values and the statistical renderer, preventing old charts from
+surviving a data or design change. A revised movie is validated before replacing
+the prior dashboard export.
