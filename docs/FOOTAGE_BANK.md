@@ -34,3 +34,7 @@ For DVIDS sources, retain credited authors, the source URL and the source's non-
 > The appearance of U.S. Department of War (DoW) visual information does not imply or constitute DoW endorsement.
 
 Sources: [DVIDS public use terms](https://www.dvidshub.net/about/copyright), [licensed Miami Shores archive](https://commons.wikimedia.org/wiki/File:Hurricane_Irma.webm), [Pexels license](https://www.pexels.com/license/).
+
+## Combined edit
+
+The [combined clips, statistics and maps report](FLORIDA_MIXED_REPORT.md) interleaves this bank with the approved recorded forecast and adds explicit historical context narration.
