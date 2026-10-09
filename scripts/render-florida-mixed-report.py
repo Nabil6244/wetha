@@ -53,14 +53,31 @@ def graphic(path,title,lines,seconds,credits=False):
  d.text((960,990),'Map outline is not a forecast or impact boundary.',font=font(26),fill='#bad6de')
  png=path.with_suffix('.png');im.save(png);frames=round(seconds*30)
  ff('-loop','1','-i',bg,'-loop','1','-i',png,'-filter_complex',f"[0:v]zoompan=z='1+0.035*on/{frames}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1920x1080:fps=30[b];[b][1:v]overlay=shortest=1[v]",'-map','[v]','-frames:v',frames,'-an',*encoder_args(),'-pix_fmt','yuv420p',path)
-def footage(path,a,shot,title):
- row={'header':'HISTORICAL FLORIDA / '+EVENTS[a['catalog']['event_id']],'context':'ARCHIVE / '+(a['catalog']['captured_at'] or 'SEP–OCT 2022'),'text':shot['description'],'static_title':True,'credit':a['metadata']['attribution']+' · '+a['catalog']['location']}
+def render_footage(path,row,source,shot):
+ # Footage remains clean; full source and creator records move to end credits.
  base=Image.new('RGBA',(1920,1080));d=ImageDraw.Draw(base)
  for y in range(230):d.line((0,y,1920,y),fill=(3,14,23,round(185*(1-y/230))))
- d.rectangle((0,988,1920,1080),fill=(3,14,23,185))
- for xy,text,size in [((55,35),row['header'],24),((1230,35),row['context'],24),((55,108),shot['description'],41),((55,1032),row['credit'][:140],23)]:d.text(xy,text,font=font(size),fill='white',stroke_width=1,stroke_fill='#081d2c')
+ for xy,text,size in [((55,35),row['header'],24),((1230,35),row['context'],24)]:d.text(xy,text,font=font(size),fill='white',stroke_width=1,stroke_fill='#081d2c')
+ for i,line in enumerate(textwrap.wrap(row['text'],51)):d.text((55,108+i*50),line,font=font(41),fill='white',stroke_width=1,stroke_fill='#081d2c')
  png=path.with_suffix('.png');base.save(png)
- ff('-ss',shot['start'],'-i',ROOT/a['path'],'-loop','1','-i',png,'-filter_complex','[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,setsar=1[b];[b][1:v]overlay=shortest=1[v]','-map','[v]','-t',shot['seconds'],'-an',*encoder_args(),'-pix_fmt','yuv420p',path)
+ ff('-ss',shot['start'],'-i',source,'-loop','1','-i',png,'-filter_complex','[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,setsar=1[b];[b][1:v]overlay=shortest=1[v]','-map','[v]','-frames:v',round(shot['seconds']*30),'-an',*encoder_args(),'-pix_fmt','yuv420p',path)
+def footage(path,a,shot,title):
+ row={'header':'HISTORICAL FLORIDA / '+EVENTS[a['catalog']['event_id']],'context':'ARCHIVE / '+(a['catalog']['captured_at'] or 'SEP–OCT 2022'),'text':shot['description']}
+ render_footage(path,row,ROOT/a['path'],shot)
+def footage_credits(path,bank,base,seconds):
+ im=Image.new('RGB',(1920,1080),'#071722');d=ImageDraw.Draw(im)
+ d.text((60,55),'FOOTAGE CREDITS',font=font(40),fill='#82efdc')
+ selected={id for block in BLOCKS for id,_ in block[4]}
+ groups=[('ARCHIVAL / DVIDS',[(a['title'],a['metadata']['attribution']) for a in bank['assets'] if a['id'] in selected]),('ILLUSTRATIVE / PEXELS',[(a['location'],a['author']+' / Pexels') for a in base['media']])]
+ for column,(heading,entries) in enumerate(groups):
+  x=60+column*940;y=150;d.text((x,y),heading,font=font(28),fill='#81dce6');y+=55
+  for name,author in entries:
+   d.text((x,y),name,font=font(26),fill='white');y+=37
+   for line in textwrap.wrap(author,60):d.text((x,y),line,font=font(23),fill='#bad6de');y+=31
+   y+=25
+ for i,line in enumerate(textwrap.wrap(bank['non_endorsement_disclaimer'],110)):d.text((60,935+i*36),line,font=font(26),fill='white')
+ d.text((60,1030),'Full source URLs and reuse terms are retained in the accompanying source manifest.',font=font(24),fill='#bad6de')
+ png=path.with_suffix('.png');im.save(png);ff('-loop','1','-i',png,'-frames:v',round(seconds*30),'-r',30,'-an',*encoder_args(),'-pix_fmt','yuv420p',path)
 def run():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--archived-review',action='store_true',required=True);args=parser.parse_args()
  OUT.mkdir(parents=True,exist_ok=True);p=json.load(open(BASE/'manifest.json'));bank=json.load(open(ROOT/'docs/FLORIDA_FOOTAGE_BANK.json'));assets={a['id']:a for a in bank['assets']}
@@ -81,7 +98,7 @@ def run():
   for n,(id,index) in enumerate(selection):
    a=assets[id];shot=a['shots'][index];path=OUT/f'{name}-foot-{n:02d}.mp4';key=hashlib.sha256(code+json.dumps([a,shot],sort_keys=True).encode()).hexdigest()
    if not key_file(path,key):footage(path,a,shot,title);mark(path,key)
-   append(path,{'kind':'archive_footage','source_id':id,'range_id':shot['id'],'event_id':a['catalog']['event_id'],'captured_at':a['catalog']['captured_at'],'location':a['catalog']['location'],'source':a['metadata']['source'],'checksum':a['checksum'],'trim_start':shot['start'],'block':name})
+   append(path,{'kind':'archive_footage','source_credit_on_footage':False,'source_id':id,'range_id':shot['id'],'event_id':a['catalog']['event_id'],'captured_at':a['catalog']['captured_at'],'location':a['catalog']['location'],'source':a['metadata']['source'],'checksum':a['checksum'],'trim_start':shot['start'],'block':name})
   path=OUT/(name+'-context.mp4');key=hashlib.sha256(code+json.dumps([title,lines,hold]).encode()).hexdigest()
   if not key_file(path,key):graphic(path,title,lines,hold);mark(path,key)
   append(path,{'kind':'archive_context_'+name,'block':name,'text':title})
@@ -92,18 +109,22 @@ def run():
   for i,r in source_rows:
    clip=BASE/f'shot-{i:02d}.mp4';marker=clip.with_suffix('.sha256')
    if not marker.exists() or marker.read_text().rsplit(':',1)[-1]!=checksum(clip):raise ValueError('Approved source shot changed')
-   append(clip,{**r,'base_shot':i})
+   if r['kind']=='foot':
+    clean=OUT/f'base-foot-{i:02d}.mp4';clean_key=hashlib.sha256(code+json.dumps(r,sort_keys=True).encode()+checksum(Path(r['path'])).encode()).hexdigest()
+    if not key_file(clean,clean_key):render_footage(clean,r,Path(r['path']),{'start':r['trim_start'],'seconds':r['seconds']});mark(clean,clean_key)
+    clip=clean
+   append(clip,{**r,'base_shot':i,'source_credit_on_footage':False} if r['kind']=='foot' else {**r,'base_shot':i})
   audio_parts.append(BASE/f'voice-{beat:02d}.wav');text=(BASE/f'voice-{beat:02d}.txt').read_text();captions.append((start,cursor,text))
   for b in BLOCKS[1:]:
    if b[1]==beat:block(b)
- disclaimer=bank['non_endorsement_disclaimer'];path=OUT/'credits.mp4';graphic(path,'Source credits and archival context',['DVIDS federal footage · source credits displayed on each clip','Pexels coastal footage · NWS / NHC source graphics',disclaimer],7);append(path,{'kind':'credits','text':disclaimer});silence=OUT/'silence.wav';ff('-f','lavfi','-i','anullsrc=r=48000:cl=mono','-t',7,silence);audio_parts.append(silence)
+ disclaimer=bank['non_endorsement_disclaimer'];path=OUT/'credits.mp4';footage_credits(path,bank,p,7);append(path,{'kind':'credits','text':disclaimer});silence=OUT/'silence.wav';ff('-f','lavfi','-i','anullsrc=r=48000:cl=mono','-t',7,silence);audio_parts.append(silence)
  for name,parts in [('video',video_parts),('audio',audio_parts)]: (OUT/(name+'-concat.txt')).write_text(''.join("file '"+str(path)+"'\n" for path in parts))
  ff('-f','concat','-safe',0,'-i',OUT/'audio-concat.txt','-af','loudnorm=I=-16:TP=-1.5:LRA=9','-ar',48000,'-ac',1,OUT/'narration.wav')
- final=OUT/'florida-clips-stats-maps.mp4';temp=OUT/'florida-clips-stats-maps.tmp.mp4'
+ final=OUT/'florida-clips-stats-maps-clean.mp4';temp=OUT/'florida-clips-stats-maps.tmp.mp4'
  ff('-f','concat','-safe',0,'-i',OUT/'video-concat.txt','-i',OUT/'narration.wav','-f','lavfi','-i',score_filter(cursor),'-filter_complex',f'[2:a]loudnorm=I=-30:TP=-5:LRA=6,afade=t=in:d=2,afade=t=out:st={cursor-3}:d=3[bed];[1:a][bed]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.84:level=0[a]','-map','0:v','-map','[a]','-c:v','copy','-c:a','aac','-ar',48000,'-t',cursor,'-movflags','+faststart',temp)
  qc=subprocess.run(['ffmpeg','-hide_banner','-xerror','-i',str(temp),'-vf','blackdetect=d=1:pix_th=0.005:pic_th=0.995','-f','null','-'],capture_output=True,check=True);(OUT/'qc.log').write_bytes(qc.stderr)
  if b'black_start:' in qc.stderr:raise ValueError('Unexpected black frame interval')
  v=next(s for s in probe(temp)['streams'] if s['codec_type']=='video');assert int(v['nb_frames'])==sum(r['frames'] for r in rows);assert abs(float(v['duration'])-cursor)<.05;temp.replace(final)
- manifest={'title':'Florida: clips, statistics and maps','recorded_forecast_collected_at':p['collected_at'],'archived_review':True,'shots':rows,'seconds':cursor,'voice':'Free macOS Samantha / 150 wpm','paid_generation_calls':0,'sources':p['sources'],'footage_bank':'docs/FLORIDA_FOOTAGE_BANK.json','limitations':['Historical clips explain hazards; they do not document the recorded forecast storm.','Rendering does not refresh the forecast.','Archive images do not establish measured rain or surge heights.','Lower-resolution originals are resized for the 1080p edit.'],'output':{'path':str(final),'checksum':checksum(final),'frames':int(v['nb_frames']),'seconds':float(v['duration']),'full_decode':True,'black_check':True}}
+ manifest={'title':'Florida: clips, statistics and maps','recorded_forecast_collected_at':p['collected_at'],'archived_review':True,'shots':rows,'seconds':cursor,'voice':'Free macOS Samantha / 150 wpm','paid_generation_calls':0,'footage_credit_placement':'End credits and source manifest; no source or creator text over footage','illustrative_footage_sources':p['media'],'footage_sources':[{'id':a['id'],'metadata':a['metadata'],'catalog':a['catalog']} for a in bank['assets'] if a['id'] in {id for block in BLOCKS for id,_ in block[4]}],'sources':p['sources'],'footage_bank':'docs/FLORIDA_FOOTAGE_BANK.json','limitations':['Historical clips explain hazards; they do not document the recorded forecast storm.','Rendering does not refresh the forecast.','Archive images do not establish measured rain or surge heights.','Lower-resolution originals are resized for the 1080p edit.'],'output':{'path':str(final),'checksum':checksum(final),'frames':int(v['nb_frames']),'seconds':float(v['duration']),'full_decode':True,'black_check':True}}
  (OUT/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n');(OUT/'script.txt').write_text('\n\n'.join(text for _,_,text in captions));(OUT/'captions.srt').write_text('\n\n'.join(f'{i+1}\n{srt_time(a)} --> {srt_time(b)}\n{text}' for i,(a,b,text) in enumerate(captions))+'\n');print(final,flush=True)
 if __name__=='__main__':run()
