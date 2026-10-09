@@ -1,0 +1,88 @@
+{
+  "reviewed_at": "2026-10-09",
+  "assets": [
+    {
+      "filename": "rain-wind-4436187.mp4",
+      "source_provider": "stock",
+      "context": "illustrative",
+      "source": "https://www.pexels.com/video/strong-rain-and-wind-4436187/",
+      "attribution": "Startup MrParag / Pexels",
+      "license": "Pexels License https://www.pexels.com/license/",
+      "reuse_basis": "stock_license",
+      "reuse_evidence": "Source page labels the clip free; Pexels license permits free use and modification.",
+      "tags": [
+        "rain",
+        "wind",
+        "street"
+      ],
+      "event_id": null,
+      "location": null,
+      "captured_at": null,
+      "checksum": "d74a5cee82fd9bbf27f084aea3853cdc6f6d80b3327b69b84ce21783b307ae12",
+      "preferred_clip_seconds": 4
+    },
+    {
+      "filename": "storm-sea-1879456.mp4",
+      "source_provider": "stock",
+      "context": "illustrative",
+      "source": "https://www.pexels.com/video/storm-at-sea-1879456/",
+      "attribution": "Peggy Johnson Philip Waikoloa / Pexels",
+      "license": "Pexels License https://www.pexels.com/license/",
+      "reuse_basis": "stock_license",
+      "reuse_evidence": "Source page labels the clip free; Pexels license permits free use and modification.",
+      "tags": [
+        "waves",
+        "rough_sea"
+      ],
+      "event_id": null,
+      "location": null,
+      "captured_at": null,
+      "checksum": "8a46a0eddba2b7d83fbb7ae3bac772ed1b7bfe2f102a1e73042266040b4a6dcd",
+      "preferred_clip_seconds": 4
+    },
+    {
+      "filename": "st-lucia-irma-waves.webm",
+      "source_provider": "youtube",
+      "context": "archival",
+      "source": "https://www.youtube.com/watch?v=f5mtyHSyUp8",
+      "attribution": "Bruce and Tammy Swart",
+      "license": "CC BY 3.0 https://creativecommons.org/licenses/by/3.0/",
+      "reuse_basis": "cc_by",
+      "reuse_evidence": "https://commons.wikimedia.org/wiki/File:St._Lucia_Irma_Waves.webm documents license review on 24 November 2017. Original YouTube source; CC BY 3.0. Changes: trimmed, resized, labeled, source audio removed.",
+      "tags": [
+        "waves",
+        "coast",
+        "Irma"
+      ],
+      "event_id": "AL112017",
+      "location": "Northwest St. Lucia",
+      "captured_at": "2017-09-05",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/b/be/St._Lucia_Irma_Waves.webm?utm_campaign=index&utm_content=original&utm_source=commons.wikimedia.org",
+      "reviewed_sha1": "9b4b09f2171df625102cf9b557d004f2cc4419d5",
+      "checksum": "d5f0ce10dc7dff45918bda5d35017615c7e0d38fd2312753a0a61f57d730a17a",
+      "preferred_clip_seconds": 4
+    },
+    {
+      "filename": "ocean-rainstorm-34270425.mp4",
+      "source_provider": "stock",
+      "context": "illustrative",
+      "source": "https://www.pexels.com/video/dramatic-ocean-rainstorm-with-dark-sky-34270425/",
+      "attribution": "Marianna Sigov / Pexels",
+      "license": "Pexels License https://www.pexels.com/license/",
+      "reuse_basis": "stock_license",
+      "reuse_evidence": "Source page identifies the creator and free download; Pexels License permits free use and modification.",
+      "tags": [
+        "rain",
+        "ocean",
+        "storm",
+        "dark_sky"
+      ],
+      "event_id": null,
+      "location": null,
+      "captured_at": null,
+      "checksum": "1fedc8bff2f28cc06f43a91ae51e3128c7f89dae1c1044ca2b10fb75f40bf334",
+      "preferred_clip_seconds": 3
+    }
+  ],
+  "matching_rule": "Only assets with verified event/date/location may illustrate actual event claims; all other assets receive illustrative or archival labels."
+}

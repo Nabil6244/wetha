@@ -1,0 +1,51 @@
+Weather Intelligence Studio — local development quick start
+
+This download contains Phase 5 source code, not a standalone installer.
+Install Node.js 24 and Python 3.12, then extract this ZIP into Downloads.
+Open a terminal in the extracted wetha folder.
+
+Windows PowerShell:
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r backend/requirements.lock
+npm ci
+npm run dev
+
+macOS / Linux:
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --require-hashes -r backend/requirements.lock
+npm ci
+npm run dev
+
+Stop if any setup command fails and share its error. Keep the terminal open.
+For browser mode, open http://127.0.0.1:5173 in your local browser.
+For the Electron desktop app, stop dev with Ctrl+C and run npm run desktop.
+Never disable the Electron sandbox to bypass a launch failure.
+
+Your database starts fresh. Click Refresh sources to collect official weather
+records, or Load training dataset for clearly labeled synthetic practice data.
+Visual Director includes maps, satellite/radar observation collection and
+revision-bound scene plans. Install FFmpeg/FFprobe for Media Library imports
+and Video Production. Set manual scene timing, optionally import your own
+narration, then render a 1080p preview. No local voiceover is generated.
+Network access is required for dependencies and live weather. NHC cone
+requests may return HTTP 403. Broadcasting is a future phase.
+
+CINEMATIC HISTORICAL BENCHMARK
+  .venv/bin/python scripts/render-benchmark.py
+  Output: .local/exports/phase7/phase7-isaias-30s.mp4
+  Preview in Video Production after restarting the desktop app.
+  No paid generation or local voiceover. Fixed official sources are cached.
+  Source metadata, limitations and reproduction details: docs/PHASE_7.md
+
+NARRATED FLORIDA CHAPTER (macOS)
+  .venv/bin/python scripts/render-florida-chapter.py
+  Output: .local/exports/florida-chapter/south-florida-chapter.mp4
+  Uses cached Florida sources and the free installed Samantha voice.
+  Preview at the top of Video Production after restarting the app.
+  Sources and limitations: docs/FLORIDA_CHAPTER.md
+
+FORECAST NEWS (macOS)
+  .venv/bin/python scripts/collect-forecast-news.py
+  .venv/bin/python scripts/render-forecast-news.py
+  Output: .local/exports/forecast-news/florida-forecast-bulletin.mp4
+  Read docs/FORECAST_NEWS.md before refreshing the sourced story.

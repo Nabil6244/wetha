@@ -1,0 +1,184 @@
+"""Deterministic local suggestions. Catalogue declarations are not weather evidence."""
+import math
+import re
+from . import regional
+
+GROUPS = {
+    'wind': ('wind', 'winds', 'gust', 'gusts', 'windy'),
+    'rain': ('rain', 'rainfall', 'raining', 'downpour', 'precipitation'),
+    'flood': ('flood', 'floods', 'flooding', 'inundation'),
+    'waves': ('wave', 'waves', 'sea', 'seas', 'surf', 'coastal', 'coast', 'surge'),
+    'snow': ('snow', 'snowfall', 'blizzard'),
+    'lightning': ('lightning', 'thunder', 'thunderstorm', 'thunderstorms'),
+    'storm': ('storm', 'storms', 'hurricane', 'cyclone', 'typhoon'),
+}
+GRAPHICS = {'storm_track', 'cinematic_weather_map', 'what_changed', 'radar_animation', 'satellite_timelapse'}
+
+
+def topics(text):
+    words = set(re.findall(r'[a-z]+', text.lower()))
+    return {topic for topic, variants in GROUPS.items() if words.intersection(variants)}
+
+
+def rank(scene, assets, advisory, unavailable=()):
+    wanted = topics(scene['script_segment'])
+    if scene.get('parameters',{}).get('story',{}).get('beat') in ('context','reveal'):
+        wanted |= {'storm','rain','wind','waves'}
+    results = []
+    for asset in assets:
+        if asset['kind'] == 'audio' or asset['id'] in unavailable or not asset.get('rights_confirmed'):
+            continue
+        if not regional.match_media(scene, asset):
+            continue
+        catalog = asset.get('catalog', {})
+        shared = wanted & topics(' '.join(catalog.get('tags', [])) + ' ' + asset['name'])
+        if not shared:
+            continue
+        seconds = min(4, max(3, asset.get('preferred_clip_seconds', 3.5)))
+        start = catalog.get('preferred_trim_start', 0)
+        if asset['kind'] == 'video' and start + seconds > asset['seconds'] + .01:
+            continue
+        reasons = (['Reviewed capture region matches script'] if regional.targets(scene) else []) + ['Weather topics: ' + ', '.join(sorted(shared))]
+        score = len(shared) * 10 + (2 if asset['kind'] == 'video' else 0)
+        event = catalog.get('event_id', '')
+        if event and event.casefold() == advisory.event_key.casefold():
+            score += 30
+            reasons.append('Declared event ID matches; attribution remains contextual')
+        elif event:
+            score -= 5
+            reasons.append('Different event: ' + event + '; archival context only')
+        if catalog.get('captured_at'):
+            if catalog['captured_at'] == advisory.issued_at.date().isoformat():
+                score += 10
+                reasons.append('Declared capture date matches advisory date')
+            else:
+                reasons.append('Capture date differs from advisory date')
+        location = catalog.get('location', '').strip()
+        if location and location.casefold() in scene['script_segment'].casefold():
+            score += 10
+            reasons.append('Declared location appears in script')
+        results.append({'media_id': asset['id'], 'name': asset['name'], 'score': score,
+                        'reasons': reasons, 'seconds': seconds, 'trim_start': start,
+                        'context': asset['context'], 'source_provider': asset.get('source_provider', 'local'),
+                        'attribution': asset['attribution'], 'source': asset['source'],
+                        'label': asset['context'].upper() + ' FOOTAGE'})
+    return sorted(results, key=lambda row: (-row['score'], row['media_id']))[:5]
+
+
+def draft(plan, assets, advisory, unavailable=(), template='short_30'):
+    """Preserve every claim once, protecting geographic/data scenes and closing."""
+    scenes = plan['scenes']
+    if template != 'short_30':
+        return report(plan, assets, advisory, unavailable, template)
+    if not 1 <= len(scenes) <= 30:
+        raise ValueError('The 30-second template needs 1–30 source-linked scenes. Use manual timing for this plan.')
+    used = set()
+    edits, suggestions, issues = [], [], []
+    for i, scene in enumerate(scenes):
+        choices = rank(scene, assets, advisory, unavailable)
+        protected = scene['type'] in GRAPHICS or i == len(scenes) - 1
+        selected = next((c for c in choices if c['media_id'] not in used), None) if not protected else None
+        if selected:
+            used.add(selected['media_id'])
+        elif not protected:
+            issues.append({'scene_id': scene['id'], 'code': 'missing_footage', 'message': 'No unused matching clip; source graphic retained.'})
+        if scene.get('parameters', {}).get('unavailable_requested_layer'):
+            issues.append({'scene_id': scene['id'], 'code': 'missing_observation', 'message': scene['parameters'].get('reason', 'Requested observation unavailable.')})
+        suggestions.append({'scene_id': scene['id'], 'protected_graphic': protected, 'candidates': choices})
+        edits.append({'id': scene['id'], 'media_id': selected['media_id'] if selected else None,
+                      'seconds': selected['seconds'] if selected else 1,
+                      'trim_start': selected['trim_start'] if selected else 0, 'transition': 'cut'})
+    # Reserve one second per graphic. If the plan has too many short cuts, keep
+    # earlier claims as graphics rather than shrinking footage below three seconds.
+    for row in reversed(edits):
+        if sum(round(e['seconds'] * 30) for e in edits) <= 900:
+            break
+        if row['media_id']:
+            row.update(media_id=None, seconds=1, trim_start=0)
+            issues.append({'scene_id': row['id'], 'code': 'timing_fallback', 'message': 'Source graphic retained to fit all claims into 30 seconds.'})
+    graphics = [i for i, row in enumerate(edits) if not row['media_id']]
+    extra = 900 - sum(round(e['seconds'] * 30) for e in edits)
+    weights = [max(1, len(scenes[i]['script_segment'].split())) for i in graphics]
+    # Avoid a long script quotation dominating the edit. Six seconds per
+    # graphic is the normal cap; sparse plans need longer holds to reach 30s.
+    capacity = max(180, math.ceil((extra + 30 * len(graphics)) / len(graphics))) - 30
+    frames = [0 for _ in graphics]
+    remaining = extra
+    while remaining:
+        active = [i for i in range(len(frames)) if frames[i] < capacity]
+        weight_sum = sum(weights[i] for i in active)
+        exact = {i: remaining * weights[i] / weight_sum for i in active}
+        added = {i: min(capacity - frames[i], int(exact[i])) for i in active}
+        if not sum(added.values()):
+            for i in sorted(active, key=lambda i: (-exact[i], i))[:remaining]:
+                added[i] = 1
+        for i, count in added.items():
+            frames[i] += count
+            remaining -= count
+    if capacity > 150:
+        issues.append({'code': 'sparse_plan', 'message': 'This plan has few graphic scenes; some holds exceed six seconds. A fuller scene plan gives a faster edit.'})
+    for index, count in zip(graphics, frames):
+        edits[index]['seconds'] = (30 + count) / 30
+    return {'template': 'short_30', 'seconds': 30, 'scenes': edits, 'suggestions': suggestions, 'issues': issues,
+            'presentation': 'broadcast', 'music': True, 'satellite_context': False,
+            'note': 'Local library suggestions; catalogue matches do not verify event attribution. Every source-linked claim is preserved. Review the draft before saving.'}
+
+
+def report(plan, assets, advisory, unavailable, template):
+    target = {'report_60': 60, 'report_90': 90}[template]
+    scenes = plan['scenes']
+    if not 3 <= len(scenes) <= 15:
+        raise ValueError('Report templates need 3–15 source-linked scenes. Prepare a fuller scene plan or use manual timing.')
+    edits, suggestions, slots, issues = [], [], [], []
+    for i, scene in enumerate(scenes):
+        protected = i in (0, len(scenes)-1) or scene['type'] in GRAPHICS
+        choices = rank(scene, assets, advisory, unavailable)
+        suggestions.append({'scene_id': scene['id'], 'protected_graphic': protected, 'candidates': choices})
+        edits.append({'id': scene['id'], 'media_id': None, 'trim_start': 0, 'seconds': 3 if i in (0,len(scenes)-1) else 6, 'transition': 'cut', 'cuts': []})
+        if not protected and choices:
+            slots.append(i)
+            edits[-1]['seconds'] = 0
+    remaining = target*30 - sum(round(s['seconds']*30) for s in edits)
+    if remaining < 0:
+        raise ValueError('This report has too many graphic scenes for the selected duration. Use the longer template or manual timing.')
+    by_id = {a['id']: a for a in assets}
+    offsets, uses = {}, {}
+    count = math.ceil(remaining/120) if remaining else 0
+    lengths = [remaining//count + (1 if i < remaining%count else 0) for i in range(count)] if count else []
+    ready = bool(slots) and (not lengths or min(lengths) >= 90)
+    filled = 0
+    for frames in lengths if ready else []:
+        found = None
+        for step in range(len(slots)):
+            index = slots[(filled+step)%len(slots)]
+            choices = sorted(suggestions[index]['candidates'], key=lambda c: (uses.get(c['media_id'],0),-c['score'],c['media_id']))
+            for candidate in choices:
+                asset = by_id[candidate['media_id']]
+                start = offsets.get(asset['id'], round(candidate['trim_start']*30))
+                if asset['kind'] == 'image' and uses.get(asset['id'],0):
+                    continue
+                if asset['kind'] == 'video' and start+frames > math.floor(asset['seconds']*30):
+                    continue
+                found = index, candidate, start
+                break
+            if found:
+                break
+        if not found:
+            ready = False
+            break
+        index, candidate, start = found
+        edits[index]['cuts'].append({'media_id':candidate['media_id'],'seconds':frames/30,'trim_start':start/30})
+        edits[index]['seconds'] += frames/30
+        offsets[candidate['media_id']] = start+frames
+        uses[candidate['media_id']] = uses.get(candidate['media_id'],0)+1
+        filled += 1
+    for row in edits:
+        if not row['cuts'] and not row['seconds']:
+            row['seconds'] = 1
+    actual = sum(round(s['seconds']*30) for s in edits)/30
+    ready = ready and actual == target
+    if not ready:
+        issues.append({'code':'insufficient_footage','message':f'Not enough matching, unused footage to build {target} seconds with 3–4 second cuts. Add clips or choose the shorter template.'})
+    return {'template':template,'target_seconds':target,'seconds':actual,'ready':ready,'scenes':edits,'suggestions':suggestions,'issues':issues,
+            'presentation':'broadcast','music':True,'satellite_context':False,
+            'note':'Report draft preserves claim order. Multiple footage cuts share each script scene; source ranges are never repeated or looped. Graphic holds stay at six seconds or less.'}

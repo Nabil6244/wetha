@@ -1,0 +1,19 @@
+# Regional relevance
+
+A named state in a script now establishes a visual requirement. Florida scenes exclude unknown-location footage and clips captured in another state from automatic suggestions. Weather tags, a matching hurricane ID, and a clip filename do not establish capture location. Automatic recognition covers the 50 states, Washington DC and Puerto Rico by full name. Cities, counties, abbreviations and other countries require an explicit editorial focus; city/county-level boundaries are not implemented in this phase.
+
+In Media Library, record a capture region and the URL documenting it, then check that you reviewed the location reference. This is an editor attestation, not automatic independent verification. Location and license review remain separate. Metadata edits cannot change the catalogue pinned in an existing timeline. New timelines and render retries reject mismatched regional footage. Capture location alone does not establish the reported event or date; illustrative/archive labels still apply.
+
+Each scene has a Regional Focus selector. Automatic uses state names in that scene's actual narration. An explicit state focuses a scene whose narration names no state, and cannot conflict with a named state. Automatic suggestions preserve the choice; loading a saved timeline restores it. A scene mentioning multiple states can use their combined map context; split it into individual regional beats when describing local measurements or impacts.
+
+Broadcast maps use source-pinned Census 2024 1:20,000,000 NAD83 outlines, with camera bounds for the selected state, nearby coastal context and labeled state outlines. These are geographic presentation boundaries, not warning boundaries. Source layers, city labels and reported points outside the regional viewport are removed. Layer bounding-box intersection establishes regional context only; it does not establish local observations everywhere inside a state. Large areas and antimeridian-spanning Alaska require further editorial map refinement.
+
+Unknown native image geolocation is blocked for a scoped scene. Registered radar must intersect the regional viewport; existing source timestamps and legends are retained. Missing local weather layers produce a labeled state-map fallback and a preflight issue. No out-of-state weather is substituted. Only Broadcast style currently supports region-focused source graphics.
+
+Storm-wide central wind/pressure facts are removed from local maps. Automatic change dials/comparison graphics cannot turn hurricane advisory values into local measurements; those scenes are blocked pending source-linked local data. This phase does not add a new local-station measurement importer. Existing source-linked local wording can be used, but a regional statistics scene needs upstream local evidence rather than manually relabeling storm-wide values.
+
+Regional media discovery excludes unrelated reviewed sample clips. Live search titles may identify candidates; they still require a source capture-location review before automatic regional selection. External search links preserve the place query. Use historical sources for historical scripts; current alerts and imagery must not be substituted into an older storm reconstruction.
+
+The Regional Relevance panel lists named-state script scenes and their count of location-reviewed assets, making collection gaps visible. The approved 90-second documentary remains unchanged. Its illustrative/Irma sources have not been relabeled as Florida footage. No paid generation or voiceover is used.
+
+Sources: [Census cartographic boundary files](https://www.census.gov/geographies/mapping-files/2024/geo/carto-boundary-file.html); [pinned official state archive](https://www2.census.gov/geo/tiger/GENZ2024/shp/cb_2024_us_state_20m.zip). Rebuild the bundled state catalogue with `.venv/bin/python scripts/build-regions.py` after downloading that archive to `.local/regions/`.

@@ -1,0 +1,52 @@
+{
+  "chapters": [
+    {
+      "chapter_id": "hook",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "origins",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "strengthening",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "warnings",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "landfall",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "rainfall",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "coast",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "inland",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "forecast",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "record",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "lessons",
+      "render_ids": []
+    },
+    {
+      "chapter_id": "payoff",
+      "render_ids": []
+    }
+  ]
+}
