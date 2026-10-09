@@ -38,3 +38,7 @@ Sources: [DVIDS public use terms](https://www.dvidshub.net/about/copyright), [li
 ## Combined edit
 
 The [combined clips, statistics and maps report](FLORIDA_MIXED_REPORT.md) interleaves this bank with the approved recorded forecast and adds explicit historical context narration.
+
+## Picture-area quality review
+
+A stricter review excludes nine of the original 46 cut ranges because the source recordings contain short black sections inside them. There are **37 cleared ranges**. Rejected IDs remain documented for provenance and must not be selected. The default Bradenton trim now starts at a cleared range. Picture-area checks exclude overlay headers, which can hide a blank image from whole-frame tests.

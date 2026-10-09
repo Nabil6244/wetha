@@ -13,13 +13,13 @@ BASE=ROOT/'.local/exports/forecast-news';OUT=ROOT/'.local/exports/florida-mixed-
 BLOCKS=[
  ('intro',-1,'Forecast numbers. Real scenes. Different dates.',
   'This is the recorded Florida forecast edition from October ninth, twenty twenty-six. We are combining its official maps and statistics with clearly dated historical footage. These opening rain scenes show Hurricane Ian in Bradenton in twenty twenty-two. They are examples of weather impacts, not observations of the forecast storm.',
-  [('858954',0),('858954',2)],['RECORDED FORECAST','09 OCT 2026','Historical clips retain their own event and date.']),
+  [('858954',4),('858954',5)],['RECORDED FORECAST','09 OCT 2026','Historical clips retain their own event and date.']),
  ('coast',3,'A forecast height is not a height measured in a video.',
   'For historical context, these coastal waves were filmed in Key West before Hurricane Irma in September twenty seventeen. The aerial damage view shows the Florida Keys after that storm. Neither recording measures the surge height. Keep the earlier forecast range separate from what these archival images can actually show.',
   [('549583',0),('550690',0)],['COASTAL ARCHIVE','IRMA / 2017','Key West waves · Florida Keys aerial damage']),
  ('rain',4,'The street view explains the impact, not the rain total.',
   'Now look at Bradenton during Hurricane Ian on September twenty eighth, twenty twenty-two. The recording shows rain, moving trees, street water, and roadside damage. It helps explain what local impacts can look like. It does not tell us a rainfall total, or prove what will happen during this recorded forecast.',
-  [('858954',6),('858954',7),('858954',8),('858954',10)],['RAIN AND WIND ARCHIVE','IAN / 2022','Bradenton · no rainfall total inferred from footage']),
+  [('858954',6),('858954',7),('858954',8),('858954',13)],['RAIN AND WIND ARCHIVE','IAN / 2022','Bradenton · no rainfall total inferred from footage']),
  ('recovery',10,'The storm ends. The recovery continues.',
   'The historical record also includes what happens afterward. These crews clear debris in Fort Myers Beach after Ian. Temporary roofs appear in Mexico Beach after Michael in twenty eighteen. Relief supplies are distributed in Florida after Milton in twenty twenty-four. Each scene belongs to its own storm. Together, they explain different stages of recovery without predicting damage from the current forecast.',
   [('859328',0),('859328',5),('642684',1),('940076',4)],['RECOVERY ARCHIVE','THREE SEPARATE STORMS','Ian 2022 · Michael 2018 · Milton 2024'])]
@@ -61,6 +61,7 @@ def render_footage(path,row,source,shot):
  png=path.with_suffix('.png');base.save(png)
  ff('-ss',shot['start'],'-i',source,'-loop','1','-i',png,'-filter_complex','[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,setsar=1[b];[b][1:v]overlay=shortest=1[v]','-map','[v]','-frames:v',round(shot['seconds']*30),'-an',*encoder_args(),'-pix_fmt','yuv420p',path)
 def footage(path,a,shot,title):
+ if shot.get('picture_quality',{}).get('status')=='excluded_black_interval':raise ValueError('Selected footage contains an internal black interval')
  row={'header':'HISTORICAL FLORIDA / '+EVENTS[a['catalog']['event_id']],'context':'ARCHIVE / '+(a['catalog']['captured_at'] or 'SEP–OCT 2022'),'text':shot['description']}
  render_footage(path,row,ROOT/a['path'],shot)
 def footage_credits(path,bank,base,seconds):
@@ -128,7 +129,7 @@ def run():
  ff('-f','concat','-safe',0,'-i',OUT/'audio-concat.txt','-af','loudnorm=I=-16:TP=-1.5:LRA=9','-ar',48000,'-ac',1,OUT/'narration.wav')
  final=OUT/'florida-clips-stats-maps-smooth.mp4';temp=OUT/'florida-clips-stats-maps.tmp.mp4'
  ff('-f','concat','-safe',0,'-i',OUT/'video-concat.txt','-i',OUT/'narration.wav','-f','lavfi','-i',score_filter(cursor),'-filter_complex',f'[2:a]loudnorm=I=-30:TP=-5:LRA=6,afade=t=in:d=2,afade=t=out:st={cursor-3}:d=3[bed];[1:a][bed]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.84:level=0[a]','-map','0:v','-map','[a]','-c:v','libx264','-preset','fast','-crf','20','-pix_fmt','yuv420p','-r',30,'-fps_mode','cfr','-c:a','aac','-ar',48000,'-t',cursor,'-movflags','+faststart',temp)
- qc=subprocess.run(['ffmpeg','-hide_banner','-xerror','-i',str(temp),'-vf','blackdetect=d=0.01:pix_th=0.02:pic_th=0.98','-f','null','-'],capture_output=True,check=True);(OUT/'qc.log').write_bytes(qc.stderr)
+ qc=subprocess.run(['ffmpeg','-hide_banner','-xerror','-i',str(temp),'-vf','crop=1920:850:0:100,blackdetect=d=0.01:pix_th=0.02:pic_th=0.995','-f','null','-'],capture_output=True,check=True);(OUT/'qc.log').write_bytes(qc.stderr)
  if b'black_start:' in qc.stderr:raise ValueError('Unexpected black frame interval')
  v=next(s for s in probe(temp)['streams'] if s['codec_type']=='video');assert int(v['nb_frames'])==sum(r['frames'] for r in rows);assert abs(float(v['duration'])-cursor)<.05;temp.replace(final)
  manifest={'title':'Florida: clips, statistics and maps','recorded_forecast_collected_at':p['collected_at'],'archived_review':True,'shots':rows,'seconds':cursor,'voice':'Free macOS Samantha / 150 wpm','paid_generation_calls':0,'descriptive_headlines_visible':False,'footage_credit_placement':'End credits and source manifest; no source or creator text over footage','illustrative_footage_sources':p['media'],'footage_sources':[{'id':a['id'],'metadata':a['metadata'],'catalog':a['catalog']} for a in bank['assets'] if a['id'] in {id for block in BLOCKS for id,_ in block[4]}],'sources':p['sources'],'footage_bank':'docs/FLORIDA_FOOTAGE_BANK.json','limitations':['Historical clips explain hazards; they do not document the recorded forecast storm.','Rendering does not refresh the forecast.','Archive images do not establish measured rain or surge heights.','Lower-resolution originals are resized for the 1080p edit.'],'output':{'path':str(final),'checksum':checksum(final),'frames':int(v['nb_frames']),'seconds':float(v['duration']),'full_decode':True,'black_check':True}}

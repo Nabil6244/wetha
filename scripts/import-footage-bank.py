@@ -36,11 +36,13 @@ def main():
         info = probe(path)
         duration = float(info['format']['duration'])
         for shot in asset['shots']:
+            if shot.get('picture_quality', {}).get('status') == 'excluded_black_interval':
+                continue
             if not 0 <= shot['start'] < shot['start'] + shot['seconds'] <= duration or not 3 <= shot['seconds'] <= 4:
                 raise ValueError(f'{path.name}: invalid short cut')
         ready.append((asset, path, metadata, catalog))
     if args.check_only:
-        print(f'Validated {len(ready)} files and {sum(len(a[0]["shots"]) for a in ready)} cut ranges')
+        print(f'Validated {len(ready)} files and {sum(sum(s.get("picture_quality", {}).get("status") != "excluded_black_interval" for s in a[0]["shots"]) for a in ready)} cut ranges')
         return
     result = []
     with httpx.Client(base_url=args.api.rstrip('/'), timeout=120, trust_env=False) as client:

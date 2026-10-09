@@ -43,7 +43,7 @@
         "location_reviewed": true,
         "captured_at": "2022-09-28",
         "reference": "https://www.dvidshub.net/video/858954/b-roll-hurricane-ian-damage-bradenton",
-        "preferred_trim_start": 2
+        "preferred_trim_start": 125
       },
       "shots": [
         {
@@ -51,98 +51,189 @@
           "start": 2,
           "seconds": 3.5,
           "description": "Rain across neighborhood road",
-          "camera_family": "858954-Rain across neighborhood road"
+          "camera_family": "858954-Rain across neighborhood road",
+          "picture_quality": {
+            "status": "excluded_black_interval",
+            "black_intervals_seconds": [
+              [
+                1.837167,
+                2.170833
+              ]
+            ]
+          }
         },
         {
           "id": "858954-02",
           "start": 42,
           "seconds": 3.5,
           "description": "Car passing wet intersection",
-          "camera_family": "858954-Car passing wet intersection"
+          "camera_family": "858954-Car passing wet intersection",
+          "picture_quality": {
+            "status": "excluded_black_interval",
+            "black_intervals_seconds": [
+              [
+                3.412033,
+                3.512133
+              ]
+            ]
+          }
         },
         {
           "id": "858954-03",
           "start": 63,
           "seconds": 3.5,
           "description": "Palms in storm winds",
-          "camera_family": "858954-Palms in storm winds"
+          "camera_family": "858954-Palms in storm winds",
+          "picture_quality": {
+            "status": "excluded_black_interval",
+            "black_intervals_seconds": [
+              [
+                2.3653,
+                2.698967
+              ]
+            ]
+          }
         },
         {
           "id": "858954-04",
           "start": 83,
           "seconds": 3.5,
           "description": "Branches on wet street",
-          "camera_family": "858954-Branches on wet street"
+          "camera_family": "858954-Branches on wet street",
+          "picture_quality": {
+            "status": "excluded_black_interval",
+            "black_intervals_seconds": [
+              [
+                1.6846,
+                2.018267
+              ]
+            ]
+          }
         },
         {
           "id": "858954-05",
           "start": 125,
           "seconds": 3.5,
           "description": "Rain bands across road",
-          "camera_family": "858954-Rain bands across road"
+          "camera_family": "858954-Rain bands across road",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "858954-06",
           "start": 145,
           "seconds": 3.5,
           "description": "Large roadside tree in wind",
-          "camera_family": "858954-Large roadside tree in wind"
+          "camera_family": "858954-Large roadside tree in wind",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "858954-07",
           "start": 165,
           "seconds": 3.5,
           "description": "Standing water by vehicles",
-          "camera_family": "858954-Standing water by vehicles"
+          "camera_family": "858954-Standing water by vehicles",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "858954-08",
           "start": 268,
           "seconds": 3.5,
           "description": "Overturned roadside bin",
-          "camera_family": "858954-Overturned roadside bin"
+          "camera_family": "858954-Overturned roadside bin",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "858954-09",
           "start": 289,
           "seconds": 3.5,
           "description": "Damaged roadside equipment",
-          "camera_family": "858954-Damaged roadside equipment"
+          "camera_family": "858954-Damaged roadside equipment",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "858954-10",
           "start": 330,
           "seconds": 3.5,
           "description": "National Guard facility exterior",
-          "camera_family": "858954-National Guard facility exterior"
+          "camera_family": "858954-National Guard facility exterior",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "858954-11",
           "start": 350,
           "seconds": 3.5,
           "description": "Rain-lashed palms",
-          "camera_family": "858954-Rain-lashed palms"
+          "camera_family": "858954-Rain-lashed palms",
+          "picture_quality": {
+            "status": "excluded_black_interval",
+            "black_intervals_seconds": [
+              [
+                2.018333,
+                2.485467
+              ]
+            ]
+          }
         },
         {
           "id": "858954-12",
           "start": 370,
           "seconds": 3.5,
           "description": "Roadside utility lines",
-          "camera_family": "858954-Roadside utility lines"
+          "camera_family": "858954-Roadside utility lines",
+          "picture_quality": {
+            "status": "excluded_black_interval",
+            "black_intervals_seconds": [
+              [
+                3.0727,
+                3.506467
+              ]
+            ]
+          }
         },
         {
           "id": "858954-13",
           "start": 432,
           "seconds": 3.5,
           "description": "Damaged tree beside building",
-          "camera_family": "858954-Damaged tree beside building"
+          "camera_family": "858954-Damaged tree beside building",
+          "picture_quality": {
+            "status": "excluded_black_interval",
+            "black_intervals_seconds": [
+              [
+                2.434,
+                2.901133
+              ]
+            ]
+          }
         },
         {
           "id": "858954-14",
           "start": 454,
           "seconds": 3.5,
           "description": "Waterfront in heavy rain",
-          "camera_family": "858954-Waterfront in heavy rain"
+          "camera_family": "858954-Waterfront in heavy rain",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -194,63 +285,99 @@
           "start": 14,
           "seconds": 3.5,
           "description": "Crew and loader on street",
-          "camera_family": "859328-Crew and loader on street"
+          "camera_family": "859328-Crew and loader on street",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "859328-02",
           "start": 31,
           "seconds": 3.5,
           "description": "Close view of tracked loader",
-          "camera_family": "859328-Close view of tracked loader"
+          "camera_family": "859328-Close view of tracked loader",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "859328-03",
           "start": 46,
           "seconds": 3.5,
           "description": "Crew inspecting debris",
-          "camera_family": "859328-Crew inspecting debris"
+          "camera_family": "859328-Crew inspecting debris",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "859328-04",
           "start": 61,
           "seconds": 3.5,
           "description": "Road clearance wide view",
-          "camera_family": "859328-Road clearance wide view"
+          "camera_family": "859328-Road clearance wide view",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "859328-05",
           "start": 91,
           "seconds": 3.5,
           "description": "Loader and damaged houses",
-          "camera_family": "859328-Loader and damaged houses"
+          "camera_family": "859328-Loader and damaged houses",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "859328-06",
           "start": 120,
           "seconds": 3.5,
           "description": "Loader bucket moving rubble",
-          "camera_family": "859328-Loader bucket moving rubble"
+          "camera_family": "859328-Loader bucket moving rubble",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "859328-07",
           "start": 150,
           "seconds": 3.5,
           "description": "Heavy equipment clearing palm debris",
-          "camera_family": "859328-Heavy equipment clearing palm debris"
+          "camera_family": "859328-Heavy equipment clearing palm debris",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "859328-08",
           "start": 194,
           "seconds": 3.5,
           "description": "Worker directing clearance",
-          "camera_family": "859328-Worker directing clearance"
+          "camera_family": "859328-Worker directing clearance",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "859328-09",
           "start": 225,
           "seconds": 3.5,
           "description": "Debris outside houses",
-          "camera_family": "859328-Debris outside houses"
+          "camera_family": "859328-Debris outside houses",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -301,35 +428,65 @@
           "start": 1,
           "seconds": 3.5,
           "description": "Street lined with storm debris",
-          "camera_family": "642684-Street lined with storm debris"
+          "camera_family": "642684-Street lined with storm debris",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "642684-02",
           "start": 9,
           "seconds": 3.5,
           "description": "Homes with temporary blue roofs",
-          "camera_family": "642684-Homes with temporary blue roofs"
+          "camera_family": "642684-Homes with temporary blue roofs",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "642684-03",
           "start": 24,
           "seconds": 3.5,
           "description": "Damaged building and standing water",
-          "camera_family": "642684-Damaged building and standing water"
+          "camera_family": "642684-Damaged building and standing water",
+          "picture_quality": {
+            "status": "excluded_black_interval",
+            "black_intervals_seconds": [
+              [
+                0.024,
+                0.657967
+              ]
+            ]
+          }
         },
         {
           "id": "642684-04",
           "start": 31,
           "seconds": 3.5,
           "description": "House beside rubble",
-          "camera_family": "642684-House beside rubble"
+          "camera_family": "642684-House beside rubble",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "642684-05",
           "start": 40,
           "seconds": 3.5,
           "description": "Neighborhood recovery street",
-          "camera_family": "642684-Neighborhood recovery street"
+          "camera_family": "642684-Neighborhood recovery street",
+          "picture_quality": {
+            "status": "excluded_black_interval",
+            "black_intervals_seconds": [
+              [
+                1.674967,
+                2.6426
+              ]
+            ]
+          }
         }
       ]
     },
@@ -381,49 +538,77 @@
           "start": 2,
           "seconds": 3.5,
           "description": "Relief vehicle staging",
-          "camera_family": "940076-Relief vehicle staging"
+          "camera_family": "940076-Relief vehicle staging",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "940076-02",
           "start": 10,
           "seconds": 3.5,
           "description": "Archived radar briefing screen",
-          "camera_family": "940076-Archived radar briefing screen"
+          "camera_family": "940076-Archived radar briefing screen",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "940076-03",
           "start": 19,
           "seconds": 3.5,
           "description": "Response planning briefing",
-          "camera_family": "940076-Response planning briefing"
+          "camera_family": "940076-Response planning briefing",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "940076-04",
           "start": 27,
           "seconds": 3.5,
           "description": "Operations center wide view",
-          "camera_family": "940076-Operations center wide view"
+          "camera_family": "940076-Operations center wide view",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "940076-05",
           "start": 47,
           "seconds": 3.5,
           "description": "Relief supplies and community",
-          "camera_family": "940076-Relief supplies and community"
+          "camera_family": "940076-Relief supplies and community",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "940076-06",
           "start": 55,
           "seconds": 3.5,
           "description": "Damaged property and clearance",
-          "camera_family": "940076-Damaged property and clearance"
+          "camera_family": "940076-Damaged property and clearance",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "940076-07",
           "start": 94,
           "seconds": 3.5,
           "description": "Relief vehicle on road",
-          "camera_family": "940076-Relief vehicle on road"
+          "camera_family": "940076-Relief vehicle on road",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -474,7 +659,11 @@
           "start": 1,
           "seconds": 3.5,
           "description": "Aerial view of damaged neighborhood",
-          "camera_family": "550690-same-camera"
+          "camera_family": "550690-same-camera",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -525,14 +714,22 @@
           "start": 1,
           "seconds": 3.5,
           "description": "Waves reaching coastal walkway",
-          "camera_family": "549583-same-camera"
+          "camera_family": "549583-same-camera",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "549583-02",
           "start": 7,
           "seconds": 3.5,
           "description": "Breaking surf and coastal palms",
-          "camera_family": "549583-same-camera"
+          "camera_family": "549583-same-camera",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -581,14 +778,22 @@
           "start": 2,
           "seconds": 3.5,
           "description": "Dark rough seas from cutter",
-          "camera_family": "939451-same-camera"
+          "camera_family": "939451-same-camera",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         },
         {
           "id": "939451-02",
           "start": 36,
           "seconds": 3.5,
           "description": "Spray and rough offshore water",
-          "camera_family": "939451-same-camera"
+          "camera_family": "939451-same-camera",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -633,7 +838,11 @@
           "start": 0,
           "seconds": 3.5,
           "description": "Miami Beach aerial context",
-          "camera_family": "pexels-15820691"
+          "camera_family": "pexels-15820691",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -678,7 +887,11 @@
           "start": 0,
           "seconds": 3.5,
           "description": "West Palm Beach aerial context",
-          "camera_family": "pexels-33840195"
+          "camera_family": "pexels-33840195",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -723,7 +936,11 @@
           "start": 0,
           "seconds": 3.5,
           "description": "Miami coastline aerial context",
-          "camera_family": "pexels-9431769"
+          "camera_family": "pexels-9431769",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -768,7 +985,11 @@
           "start": 0,
           "seconds": 3.5,
           "description": "Miami Beach aerial context",
-          "camera_family": "pexels-15999293"
+          "camera_family": "pexels-15999293",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -813,7 +1034,11 @@
           "start": 0,
           "seconds": 3.5,
           "description": "Panama City Beach, Florida aerial context",
-          "camera_family": "pexels-31040646"
+          "camera_family": "pexels-31040646",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     },
@@ -858,7 +1083,11 @@
           "start": 0,
           "seconds": 3.5,
           "description": "Panama City Beach, Florida aerial context",
-          "camera_family": "pexels-2425846"
+          "camera_family": "pexels-2425846",
+          "picture_quality": {
+            "status": "clear",
+            "black_intervals_seconds": []
+          }
         }
       ]
     }
@@ -884,5 +1113,21 @@
     "Do not use an archived radar screen as a current forecast.",
     "Use silent footage; do not republish package music or interviews without separate review."
   ],
-  "non_endorsement_disclaimer": "The appearance of U.S. Department of War (DoW) visual information does not imply or constitute DoW endorsement."
+  "non_endorsement_disclaimer": "The appearance of U.S. Department of War (DoW) visual information does not imply or constitute DoW endorsement.",
+  "picture_quality_review": {
+    "reviewed_at": "2026-10-09",
+    "usable_short_ranges": 37,
+    "excluded_ranges": [
+      "858954-01",
+      "858954-02",
+      "858954-03",
+      "858954-04",
+      "858954-11",
+      "858954-12",
+      "858954-13",
+      "642684-03",
+      "642684-05"
+    ],
+    "method": "Decode picture area at each selected trim; reject short black sections, not only full-frame black."
+  }
 }
