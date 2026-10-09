@@ -98,7 +98,11 @@ In **Video Production**, choose or prepare a scene plan, then use **Upload your 
 Its copy button includes the exact scene narration, including any rewritten story draft.
 Upload WAV, MP3, M4A, FLAC or OGG (up to 250 MiB and one hour); the app validates
 the file, measures its duration, and selects it for the timeline. Listen to the audio,
-use **Fit timing to audio**, confirm it matches the script, then check, save and render.
+use **Match video length to voiceover**, confirm it matches the script, then click
+**Make final video**. The app checks, saves and renders the timeline in one action.
+Preview and download the MP4 under **Your videos**. Use **Edit visuals & timing**
+for footage suggestions, map choices, trim points and other detailed controls.
+Example videos and one-hour planning are in the expandable examples section.
 This uses local processing and no paid generation service.
 
 Timing fit distributes whole video frames across scenes (1–120 seconds per scene).

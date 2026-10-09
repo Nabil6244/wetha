@@ -21,6 +21,7 @@ test('phase 5 imports licensed media and renders a source-linked silent preview'
   await page.getByLabel('SCRIPT FOR NEW PLAN').selectOption(draft.id);
   await page.getByRole('button', {name: 'Prepare scene plan', exact: true}).click();
   await expect(page.getByRole('status').filter({hasText: 'Source-linked scenes prepared'})).toBeVisible();
+  await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   const inputs = page.getByRole('spinbutton', {name: /^Scene \d+ seconds$/});
   for (const input of await inputs.all()) await input.fill('1');
   const media = (await (await request.get('/api/production')).json()).media[0];
@@ -163,6 +164,7 @@ test('newsroom handoffs, revision history and unsupported edits work in the brow
   expect(document.revision).toBe(2);
   expect(document.editorial.can_review).toBe(false);
   await page.screenshot({path:'test-results/phase-3-editor.png',fullPage:true});
+  await page.locator('#production-finish').screenshot({path:'test-results/guided-export.png'});
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
@@ -239,6 +241,7 @@ test('visual director renders real geography, labels missing layers and pins sce
   await page.getByRole('button',{name:'Radar',exact:true}).click();
   await expect(page.locator('.radar-legend')).toContainText('No timestamped radar frames');
   await page.screenshot({path:'test-results/phase-4-visual-director.png',fullPage:true});
+  await page.locator('#production-finish').screenshot({path:'test-results/guided-export.png'});
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.reload();
@@ -255,6 +258,7 @@ test('broadcast style preserves source revision and exposes the historical bench
   await page.getByLabel('SCRIPT FOR NEW PLAN').selectOption(draft.id);
   await page.getByRole('button', {name: 'Prepare scene plan', exact: true}).click();
   await expect(page.getByRole('status').filter({hasText: 'Source-linked scenes prepared'})).toBeVisible();
+  await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByLabel('VIDEO STYLE').selectOption('broadcast');
   const seconds = page.getByRole('spinbutton', {name: /^Scene \d+ seconds$/});
   for (const input of await seconds.all()) await input.fill('1');
@@ -266,6 +270,7 @@ test('broadcast style preserves source revision and exposes the historical bench
   expect(saved.presentation).toBe('broadcast');
   expect(saved.scenes.every((s: {direction: {max_words: number}; transition: string}) => s.direction.max_words === 8 && s.transition === 'fade')).toBeTruthy();
   if (production.benchmark.available) {
+    await page.getByText('Example videos, regional sources & long programs',{exact:true}).click();
     await expect(page.getByRole('heading', {name: 'Historical broadcast benchmark · AL092020'})).toBeVisible();
     expect((await request.get('/api/production/benchmark/video', {headers: {Range: 'bytes=0-1023'}})).status()).toBe(206);
   }
@@ -306,6 +311,7 @@ test('short template suggests footage, preserves claims and checks timing before
   await expect(page.getByRole('status').filter({hasText: 'Footage tags saved'})).toBeVisible();
   await page.getByRole('button', {name: 'Video Production', exact: true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN', {exact: true}).selectOption(plan.id);
+  await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByRole('button', {name: 'Suggest 30-second edit', exact: true}).click();
   await expect(page.getByRole('region', {name: 'Suggested short edit'})).toBeVisible();
   await page.getByRole('button', {name: 'Apply 30-second draft', exact: true}).click();
@@ -363,6 +369,7 @@ test('long report templates flag insufficient footage instead of stretching grap
   await page.goto('/');
   await page.getByRole('button',{name:'Video Production',exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
+  await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   for (const seconds of [60,90]) {
     await page.getByLabel('EDIT TEMPLATE',{exact:true}).selectOption(`report_${seconds}`);
     await page.getByRole('button',{name:`Suggest ${seconds}-second edit`,exact:true}).click();
@@ -378,6 +385,7 @@ test('story draft exposes rewritten beats and retains original source claims', a
   await page.goto('/');
   await page.getByRole('button',{name:'Video Production',exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
+  await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByRole('button',{name:'Build story draft',exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'Story draft prepared'})).toBeVisible();
   await expect(page.getByText(/Editorial preview: review this rewritten script/)).toBeVisible();
@@ -400,6 +408,7 @@ test('four map treatments can be selected checked and restored from a saved time
   await page.goto('/');
   await page.getByRole('button',{name:'Video Production',exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
+  await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByLabel('VIDEO STYLE',{exact:true}).selectOption('broadcast');
   for (const [i,mode] of ['track','warnings','radar','forecast'].entries()) {
     await page.getByLabel(`Scene ${i+1} map type`,{exact:true}).selectOption(mode);
@@ -421,6 +430,7 @@ test('hour chapters expose missing content and new motion graphics retain saved 
   const plan=await (await request.post('/api/visuals/plans',{data:{script_id:script.id,expected_revision:1}})).json();
   await page.goto('/');
   await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  await page.getByText('Example videos, regional sources & long programs',{exact:true}).click();
   await expect(page.getByRole('region',{name:'One-hour storm deep dive'})).toContainText('12 chapters');
   await page.getByText('Open chapter structure and content assignments',{exact:true}).click();
   await expect(page.getByLabel('Chapter 12 timeline',{exact:true})).toBeVisible();
@@ -428,6 +438,7 @@ test('hour chapters expose missing content and new motion graphics retain saved 
   await expect(page.getByRole('region',{name:'Hour content audit'})).toContainText('More chapter content needed');
   await expect(page.getByRole('region',{name:'Hour content audit'})).toContainText('0s / 3600s');
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
+  await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByLabel('VIDEO STYLE',{exact:true}).selectOption('broadcast');
   await page.getByLabel('Scene 1 motion graphic',{exact:true}).selectOption('source_card');
   await page.getByRole('button',{name:'Save timeline',exact:true}).click();
@@ -448,8 +459,10 @@ test('regional workflow blocks other-state footage and restores reviewed focus',
   await request.put(`/api/production/media/${media.id}/catalog`,{data:{tags:['rain','wind'],region_codes:['NC'],location_reviewed:true,reference:'https://example.org/synthetic-region-test'}});
   await page.goto('/');
   await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  await page.getByText('Example videos, regional sources & long programs',{exact:true}).click();
   await expect(page.getByRole('heading',{name:'Regional relevance',exact:true})).toBeVisible();
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
+  await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByLabel('VIDEO STYLE',{exact:true}).selectOption('broadcast');
   await page.getByLabel('Scene 1 regional focus',{exact:true}).selectOption('FL');
   await page.getByLabel('Scene 1 media',{exact:true}).selectOption(media.id);
@@ -464,6 +477,7 @@ test('regional workflow blocks other-state footage and restores reviewed focus',
   await expect(page.getByRole('status').filter({hasText:'Footage tags saved'})).toBeVisible();
   await page.getByRole('button',{name:'Video Production',exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
+  await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByLabel('VIDEO STYLE',{exact:true}).selectOption('broadcast');
   await page.getByLabel('Scene 1 regional focus',{exact:true}).selectOption('FL');
   await page.getByLabel('Scene 1 media',{exact:true}).selectOption(media.id);
@@ -472,6 +486,7 @@ test('regional workflow blocks other-state footage and restores reviewed focus',
   const timeline=await page.getByLabel('SAVED PRODUCTION TIMELINE').inputValue();
   await page.reload();await page.getByRole('button',{name:'Video Production',exact:true}).click();
   await page.getByLabel('SAVED PRODUCTION TIMELINE').selectOption(timeline);
+  await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await expect(page.getByLabel('Scene 1 regional focus',{exact:true})).toHaveValue('FL');
 });
 
@@ -484,6 +499,8 @@ test('manual voiceover copies the script, uploads audio and renders with fitted 
   await page.goto('/');
   await page.getByRole('button', {name:'Video Production', exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN', {exact:true}).selectOption(plan.id);
+  await expect(page.getByLabel('PROGRAM TITLE',{exact:true})).not.toBeVisible();
+  await expect(page.getByRole('navigation',{name:'Video creation steps'})).toBeVisible();
   const panel = page.getByRole('region', {name:'Manual voiceover workflow'});
   const spoken = plan.scenes.map((s:{script_segment:string}) => s.script_segment).join('\n\n');
   await expect(panel.getByLabel('Voiceover script')).toHaveValue(spoken);
@@ -506,24 +523,33 @@ test('manual voiceover copies the script, uploads audio and renders with fitted 
   await panel.getByLabel('I have permission to use this voiceover').check();
   await panel.getByRole('button', {name:'Upload audio for this video', exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'Audio uploaded and selected'})).toBeVisible();
-  await expect(page.locator('.production-narration audio')).toHaveAttribute('src', /\/api\/production\/media\/.+\/file/);
-  await page.getByRole('button', {name:'Fit timing to audio',exact:true}).click();
-  await page.getByLabel('I checked that this audio matches the script revision.').check();
-  await page.getByLabel('PROGRAM TITLE', {exact:true}).fill('Manual voiceover integration');
-  await page.getByRole('button', {name:'Check visuals & timing',exact:true}).click();
-  await expect(page.getByRole('region', {name:'Timeline checks'})).toContainText('Ready to render after saving');
-  await page.getByRole('button', {name:'Save timeline',exact:true}).click();
-  await expect(page.getByRole('status').filter({hasText:'Timeline saved'})).toBeVisible();
+  await expect(page.locator('#production-finish .production-narration audio')).toHaveAttribute('src', /\/api\/production\/media\/.+\/file/);
+  await expect(page.getByRole('button',{name:'Make final video',exact:true})).toBeDisabled();
+  await page.getByLabel('I listened and this voiceover matches the script.').check();
+  const before = (await (await request.get('/api/production')).json()).renders.length;
+  await page.getByRole('button',{name:'Make final video',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('match measured narration duration');
+  expect((await (await request.get('/api/production')).json()).renders.length).toBe(before);
+  await page.getByRole('button', {name:'Match video length to voiceover',exact:true}).click();
+  await page.getByLabel('I listened and this voiceover matches the script.').check();
+  await page.getByLabel('Video title', {exact:true}).fill('Manual voiceover integration');
+  await page.getByRole('button', {name:'Make final video',exact:true}).click();
+  await expect(page.getByRole('status').filter({hasText:'Your video is rendering locally'})).toBeVisible();
+  await expect(page.getByLabel('SAVED PRODUCTION TIMELINE')).not.toHaveValue('');
   const id = await page.getByLabel('SAVED PRODUCTION TIMELINE').inputValue();
   const saved = (await (await request.get('/api/production')).json()).timelines.find((t:{id:string}) => t.id===id);
   expect(saved.audio_mode).toBe('imported_narration');
   expect(saved.seconds).toBeCloseTo(Math.round(seconds*30)/30,2);
   expect(saved.template).toBeNull();
-  await page.getByRole('button', {name:'Render 1080p preview',exact:true}).click();
   const job = page.locator('.production-job').filter({has:page.getByRole('heading', {name:'Manual voiceover integration',exact:true})});
   await expect(job).toContainText('full output decoded',{timeout:70000});
   const completed = (await (await request.get('/api/production')).json()).renders.find((r:{timeline_id:string}) => r.timeline_id===id);
   expect(completed.validation.audio_mode).toBe('imported_narration');
   expect(completed.validation.seconds).toBeCloseTo(seconds,1);
+  await expect(page.locator('.production-preview video')).toBeVisible();
+  await expect(job.getByRole('link',{name:'Download MP4',exact:true})).toBeVisible();
+  await page.locator('#production-finish').screenshot({path:'test-results/guided-export.png'});
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await panel.screenshot({path:'test-results/manual-voiceover.png'});
 });

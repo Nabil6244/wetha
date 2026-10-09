@@ -25,8 +25,11 @@ Your database starts fresh. Click Refresh sources to collect official weather
 records, or Load training dataset for clearly labeled synthetic practice data.
 Visual Director includes maps, satellite/radar observation collection and
 revision-bound scene plans. Install FFmpeg/FFprobe for Media Library imports
-and Video Production. Set manual scene timing, optionally import your own
-narration, then render a 1080p preview. No local voiceover is generated.
+and Video Production. Choose a script, copy the scene narration, upload your
+audio, and use Match video length to voiceover. Confirm the audio matches the
+script, then click Make final video. Preview and download the MP4 under Your
+videos. Edit visuals & timing opens the detailed editor. No local voiceover
+is generated.
 Network access is required for dependencies and live weather. NHC cone
 requests may return HTTP 403. Broadcasting is a future phase.
 

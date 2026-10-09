@@ -26,7 +26,7 @@ export default function ManualNarration({text, label, maxBytes, disabled, onUplo
   const [copyStatus, setCopyStatus] = useState('');
   const [inputKey, setInputKey] = useState(0);
   return <section className="panel" aria-label="Manual voiceover workflow">
-    <div className="panel-header"><h2>Upload your voiceover</h2><span className="pill">No generation credits</span></div>
+    <div className="panel-header"><h2>2. Copy script &amp; upload voiceover</h2><span className="pill">No generation credits</span></div>
     <div className="detail-body">
       <p>Copy the narration below, record it or use your preferred voice tool, then upload the finished audio for this video.</p>
       <p className="muted">{label}</p>
