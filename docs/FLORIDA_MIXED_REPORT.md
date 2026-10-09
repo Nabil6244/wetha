@@ -11,7 +11,7 @@ The original 36-shot report contributes its 28 statistical and map treatments an
 - After the rain forecast: rain, street water, damaged equipment and palms in Bradenton during Ian (2022).
 - After the longer-range forecast: debris clearance after Ian, temporary roofs after Michael (2018), and relief supplies after Milton (2024).
 
-The original report and footage preview remain available. The combined output is `.local/exports/florida-mixed-report/florida-clips-stats-maps-no-headlines.mp4`, with a source/shot manifest, script, captions and decode/black-frame QA log in the same folder.
+The original report and footage preview remain available. The combined output is `.local/exports/florida-mixed-report/florida-clips-stats-maps-smooth.mp4`, with a source/shot manifest, script, captions and decode/black-frame QA log in the same folder.
 
 Reproduce with the existing reviewed local source files:
 
@@ -19,4 +19,4 @@ Reproduce with the existing reviewed local source files:
 .venv/bin/python scripts/render-florida-mixed-report.py --archived-review
 ```
 
-The renderer validates the approved base video checksum and footage bank checksums, reuses the approved graphic shots, generates additional narration with free macOS Samantha, and checks the complete 1080p/30 fps output before replacing the final file. Downloaded media and rendered outputs remain excluded from Git. Stock clips have unknown capture dates and remain illustrative. Historical scenes never serve as event evidence for the forecast storm.
+The renderer validates the approved base video checksum and footage bank checksums, reuses the approved graphic shots, generates additional narration with free macOS Samantha, encodes the assembled picture as one continuous H.264 stream to avoid decoder reconfiguration at cuts, and checks the complete 1080p/30 fps output before replacing the final file. Downloaded media and rendered outputs remain excluded from Git. Stock clips have unknown capture dates and remain illustrative. Historical scenes never serve as event evidence for the forecast storm.
