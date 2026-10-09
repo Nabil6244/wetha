@@ -1,0 +1,888 @@
+{
+  "reviewed_at": "2026-10-09",
+  "scope": "Florida historical weather chapters plus separately labeled coastal illustration and Gulf offshore context",
+  "assets": [
+    {
+      "id": "858954",
+      "title": "Bradenton rain, wind and street damage",
+      "path": ".local/footage-expansion/prepared/858954.mp4",
+      "checksum": "107784bf311c348ed67fc9f5d7aa2971197a700bb6e2059f92f38bbdf741cc85",
+      "source_checksum": "b4ba6e874888bf74a550e37f42d42cfbd10218947e196d765d193d2b5328b989",
+      "source_page_checksum": "63ff8b63df26f7aa400459d240ac585153d298e20d35352f30884a7183fae144",
+      "download_url": "https://d34w7g4gy10iej.cloudfront.net/video/2209/DOD_109243633/DOD_109243633.mp4",
+      "seconds": 478.311167,
+      "width": 1280,
+      "height": 720,
+      "changes": "Source audio removed; resized to 1280x720 and re-encoded H.264",
+      "metadata": {
+        "name": "Bradenton rain, wind and street damage \u2014 archive.mp4",
+        "kind": "video",
+        "context": "archival",
+        "license": "Public domain (United States); source terms https://www.dvidshub.net/about/copyright",
+        "attribution": "Jacob Hancock and Jesse Hanson / U.S. Air National Guard / 125th Fighter Wing",
+        "source": "https://www.dvidshub.net/video/858954/b-roll-hurricane-ian-damage-bradenton",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "public_domain",
+        "reuse_evidence": "Official DVIDS item labels this recording PUBLIC DOMAIN and credits federal personnel. Retain source credit and non-endorsement disclaimer. Source audio removed.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "rain",
+          "wind",
+          "street",
+          "flooding",
+          "damage"
+        ],
+        "event_id": "AL092022",
+        "location": "Bradenton, Florida",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": "2022-09-28",
+        "reference": "https://www.dvidshub.net/video/858954/b-roll-hurricane-ian-damage-bradenton",
+        "preferred_trim_start": 2
+      },
+      "shots": [
+        {
+          "id": "858954-01",
+          "start": 2,
+          "seconds": 3.5,
+          "description": "Rain across neighborhood road",
+          "camera_family": "858954-Rain across neighborhood road"
+        },
+        {
+          "id": "858954-02",
+          "start": 42,
+          "seconds": 3.5,
+          "description": "Car passing wet intersection",
+          "camera_family": "858954-Car passing wet intersection"
+        },
+        {
+          "id": "858954-03",
+          "start": 63,
+          "seconds": 3.5,
+          "description": "Palms in storm winds",
+          "camera_family": "858954-Palms in storm winds"
+        },
+        {
+          "id": "858954-04",
+          "start": 83,
+          "seconds": 3.5,
+          "description": "Branches on wet street",
+          "camera_family": "858954-Branches on wet street"
+        },
+        {
+          "id": "858954-05",
+          "start": 125,
+          "seconds": 3.5,
+          "description": "Rain bands across road",
+          "camera_family": "858954-Rain bands across road"
+        },
+        {
+          "id": "858954-06",
+          "start": 145,
+          "seconds": 3.5,
+          "description": "Large roadside tree in wind",
+          "camera_family": "858954-Large roadside tree in wind"
+        },
+        {
+          "id": "858954-07",
+          "start": 165,
+          "seconds": 3.5,
+          "description": "Standing water by vehicles",
+          "camera_family": "858954-Standing water by vehicles"
+        },
+        {
+          "id": "858954-08",
+          "start": 268,
+          "seconds": 3.5,
+          "description": "Overturned roadside bin",
+          "camera_family": "858954-Overturned roadside bin"
+        },
+        {
+          "id": "858954-09",
+          "start": 289,
+          "seconds": 3.5,
+          "description": "Damaged roadside equipment",
+          "camera_family": "858954-Damaged roadside equipment"
+        },
+        {
+          "id": "858954-10",
+          "start": 330,
+          "seconds": 3.5,
+          "description": "National Guard facility exterior",
+          "camera_family": "858954-National Guard facility exterior"
+        },
+        {
+          "id": "858954-11",
+          "start": 350,
+          "seconds": 3.5,
+          "description": "Rain-lashed palms",
+          "camera_family": "858954-Rain-lashed palms"
+        },
+        {
+          "id": "858954-12",
+          "start": 370,
+          "seconds": 3.5,
+          "description": "Roadside utility lines",
+          "camera_family": "858954-Roadside utility lines"
+        },
+        {
+          "id": "858954-13",
+          "start": 432,
+          "seconds": 3.5,
+          "description": "Damaged tree beside building",
+          "camera_family": "858954-Damaged tree beside building"
+        },
+        {
+          "id": "858954-14",
+          "start": 454,
+          "seconds": 3.5,
+          "description": "Waterfront in heavy rain",
+          "camera_family": "858954-Waterfront in heavy rain"
+        }
+      ]
+    },
+    {
+      "id": "859328",
+      "title": "Fort Myers Beach debris clearance",
+      "path": ".local/footage-expansion/prepared/859328.mp4",
+      "checksum": "e589715edbaa459a9031c49b040c55633731292afee40d18482ca54b2b2380ad",
+      "source_checksum": "705879941092d9d45f19c6d3ff886b28cdf495bd30e48bbb86e4588d6fea6fd9",
+      "source_page_checksum": "935b40addc0367fd42b6f44f95f18566786b90976d2fed454273ec0a3f21cce5",
+      "download_url": "https://d34w7g4gy10iej.cloudfront.net/video/2210/DOD_109248542/DOD_109248542.mp4",
+      "seconds": 288.76,
+      "width": 1280,
+      "height": 720,
+      "changes": "Source audio removed; video stream retained",
+      "metadata": {
+        "name": "Fort Myers Beach debris clearance \u2014 archive.mp4",
+        "kind": "video",
+        "context": "archival",
+        "license": "Public domain (United States); source terms https://www.dvidshub.net/about/copyright",
+        "attribution": "Jesse Hanson and Jacob Hancock / U.S. Air National Guard / 125th Fighter Wing",
+        "source": "https://www.dvidshub.net/video/859328/b-roll-hurricane-ian-202nd-rhs-response",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "public_domain",
+        "reuse_evidence": "Official DVIDS item labels this recording PUBLIC DOMAIN and credits federal personnel. Retain source credit and non-endorsement disclaimer. Source audio removed. Capture date unresolved: description says September 30; Date Taken field says October 1, 2022.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "debris",
+          "recovery",
+          "cleanup",
+          "road_clearance"
+        ],
+        "event_id": "AL092022",
+        "location": "Fort Myers Beach, Florida",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": null,
+        "reference": "https://www.dvidshub.net/video/859328/b-roll-hurricane-ian-202nd-rhs-response",
+        "preferred_trim_start": 14
+      },
+      "shots": [
+        {
+          "id": "859328-01",
+          "start": 14,
+          "seconds": 3.5,
+          "description": "Crew and loader on street",
+          "camera_family": "859328-Crew and loader on street"
+        },
+        {
+          "id": "859328-02",
+          "start": 31,
+          "seconds": 3.5,
+          "description": "Close view of tracked loader",
+          "camera_family": "859328-Close view of tracked loader"
+        },
+        {
+          "id": "859328-03",
+          "start": 46,
+          "seconds": 3.5,
+          "description": "Crew inspecting debris",
+          "camera_family": "859328-Crew inspecting debris"
+        },
+        {
+          "id": "859328-04",
+          "start": 61,
+          "seconds": 3.5,
+          "description": "Road clearance wide view",
+          "camera_family": "859328-Road clearance wide view"
+        },
+        {
+          "id": "859328-05",
+          "start": 91,
+          "seconds": 3.5,
+          "description": "Loader and damaged houses",
+          "camera_family": "859328-Loader and damaged houses"
+        },
+        {
+          "id": "859328-06",
+          "start": 120,
+          "seconds": 3.5,
+          "description": "Loader bucket moving rubble",
+          "camera_family": "859328-Loader bucket moving rubble"
+        },
+        {
+          "id": "859328-07",
+          "start": 150,
+          "seconds": 3.5,
+          "description": "Heavy equipment clearing palm debris",
+          "camera_family": "859328-Heavy equipment clearing palm debris"
+        },
+        {
+          "id": "859328-08",
+          "start": 194,
+          "seconds": 3.5,
+          "description": "Worker directing clearance",
+          "camera_family": "859328-Worker directing clearance"
+        },
+        {
+          "id": "859328-09",
+          "start": 225,
+          "seconds": 3.5,
+          "description": "Debris outside houses",
+          "camera_family": "859328-Debris outside houses"
+        }
+      ]
+    },
+    {
+      "id": "642684",
+      "title": "Mexico Beach damage and temporary roofs",
+      "path": ".local/footage-expansion/prepared/642684.mp4",
+      "checksum": "354475374fa973382fbd92e2c0595246831efced5d097e7a25c8f0c78198cf6f",
+      "source_checksum": "19c4ad432e383d8542c895c7684f16a723d2871edd7308860eb81f9fa4e63d39",
+      "source_page_checksum": "4e09e9420a0f41920780ad9afc73486e341f3189ef250f8784754b1497275fee",
+      "download_url": "https://d34w7g4gy10iej.cloudfront.net/video/1811/DOD_106240779/DOD_106240779-1024x576-1769k.mp4",
+      "seconds": 47.7477,
+      "width": 1024,
+      "height": 576,
+      "changes": "Source audio removed; video stream retained",
+      "metadata": {
+        "name": "Mexico Beach damage and temporary roofs \u2014 archive.mp4",
+        "kind": "video",
+        "context": "archival",
+        "license": "Public domain (United States); source terms https://www.dvidshub.net/about/copyright",
+        "attribution": "Patrick Loch / U.S. Army Corps of Engineers",
+        "source": "https://www.dvidshub.net/video/642684/hurricane-michael-b-roll-mexico-beach",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "public_domain",
+        "reuse_evidence": "Official DVIDS item labels this recording PUBLIC DOMAIN and credits federal personnel. Retain source credit and non-endorsement disclaimer. Source audio removed.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "damage",
+          "temporary_roofs",
+          "recovery"
+        ],
+        "event_id": "AL142018",
+        "location": "Mexico Beach, Florida",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": "2018-11-21",
+        "reference": "https://www.dvidshub.net/video/642684/hurricane-michael-b-roll-mexico-beach",
+        "preferred_trim_start": 1
+      },
+      "shots": [
+        {
+          "id": "642684-01",
+          "start": 1,
+          "seconds": 3.5,
+          "description": "Street lined with storm debris",
+          "camera_family": "642684-Street lined with storm debris"
+        },
+        {
+          "id": "642684-02",
+          "start": 9,
+          "seconds": 3.5,
+          "description": "Homes with temporary blue roofs",
+          "camera_family": "642684-Homes with temporary blue roofs"
+        },
+        {
+          "id": "642684-03",
+          "start": 24,
+          "seconds": 3.5,
+          "description": "Damaged building and standing water",
+          "camera_family": "642684-Damaged building and standing water"
+        },
+        {
+          "id": "642684-04",
+          "start": 31,
+          "seconds": 3.5,
+          "description": "House beside rubble",
+          "camera_family": "642684-House beside rubble"
+        },
+        {
+          "id": "642684-05",
+          "start": 40,
+          "seconds": 3.5,
+          "description": "Neighborhood recovery street",
+          "camera_family": "642684-Neighborhood recovery street"
+        }
+      ]
+    },
+    {
+      "id": "940076",
+      "title": "Florida Milton relief operations",
+      "path": ".local/footage-expansion/prepared/940076.mp4",
+      "checksum": "0846ee46a6b6990524134f5e6e0cb95984535e680d46fe313d21cabdaafda7a8",
+      "source_checksum": "46a2d37fc304c1711785b99b1419935990ade88525118a77dfc165bc35e63300",
+      "source_page_checksum": "d9450532ee47e97ee54859fbd9e11f28f5278c9a5c4ff3c01598ecee9aad16dc",
+      "download_url": "https://d34w7g4gy10iej.cloudfront.net/video/2410/DOD_110621193/DOD_110621193.mp4",
+      "seconds": 107.5,
+      "width": 1920,
+      "height": 1080,
+      "changes": "Source audio removed; video stream retained",
+      "metadata": {
+        "name": "Florida Milton relief operations \u2014 archive.mp4",
+        "kind": "video",
+        "context": "archival",
+        "license": "Public domain (United States); source terms https://www.dvidshub.net/about/copyright",
+        "attribution": "Brooke Keisler / U.S. Air National Guard / 125th Fighter Wing",
+        "source": "https://www.dvidshub.net/video/940076/hurricane-milton-response-florida-army-and-air-national-guard-action",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "public_domain",
+        "reuse_evidence": "Official DVIDS item labels this recording PUBLIC DOMAIN and credits federal personnel. Retain source credit and non-endorsement disclaimer. Source audio removed.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "relief",
+          "supplies",
+          "planning",
+          "cleanup"
+        ],
+        "event_id": "AL142024",
+        "location": "Florida; individual towns unspecified",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": "2024-10-12",
+        "reference": "https://www.dvidshub.net/video/940076/hurricane-milton-response-florida-army-and-air-national-guard-action",
+        "preferred_trim_start": 2
+      },
+      "shots": [
+        {
+          "id": "940076-01",
+          "start": 2,
+          "seconds": 3.5,
+          "description": "Relief vehicle staging",
+          "camera_family": "940076-Relief vehicle staging"
+        },
+        {
+          "id": "940076-02",
+          "start": 10,
+          "seconds": 3.5,
+          "description": "Archived radar briefing screen",
+          "camera_family": "940076-Archived radar briefing screen"
+        },
+        {
+          "id": "940076-03",
+          "start": 19,
+          "seconds": 3.5,
+          "description": "Response planning briefing",
+          "camera_family": "940076-Response planning briefing"
+        },
+        {
+          "id": "940076-04",
+          "start": 27,
+          "seconds": 3.5,
+          "description": "Operations center wide view",
+          "camera_family": "940076-Operations center wide view"
+        },
+        {
+          "id": "940076-05",
+          "start": 47,
+          "seconds": 3.5,
+          "description": "Relief supplies and community",
+          "camera_family": "940076-Relief supplies and community"
+        },
+        {
+          "id": "940076-06",
+          "start": 55,
+          "seconds": 3.5,
+          "description": "Damaged property and clearance",
+          "camera_family": "940076-Damaged property and clearance"
+        },
+        {
+          "id": "940076-07",
+          "start": 94,
+          "seconds": 3.5,
+          "description": "Relief vehicle on road",
+          "camera_family": "940076-Relief vehicle on road"
+        }
+      ]
+    },
+    {
+      "id": "550690",
+      "title": "Florida Keys aerial damage",
+      "path": ".local/footage-expansion/prepared/550690.mp4",
+      "checksum": "ad17728fbc13e1fcc712c0dc692e4f9723438aa5b8f7383ee2ca230107a1a4c0",
+      "source_checksum": "ce5631040ae48732d93faeaa3e8a1efdf92578907a13d76144238a220d32da88",
+      "source_page_checksum": "a91c1f9e37b7c3b898c36eaa77dd44b2a20f3885ed35d8022e499940cd371ad9",
+      "download_url": "https://d34w7g4gy10iej.cloudfront.net/video/1709/DOD_104832211/DOD_104832211-1024x576-1769k.mp4",
+      "seconds": 12.779433,
+      "width": 1024,
+      "height": 576,
+      "changes": "Source audio removed; video stream retained",
+      "metadata": {
+        "name": "Florida Keys aerial damage \u2014 archive.mp4",
+        "kind": "video",
+        "context": "archival",
+        "license": "Public domain (United States); source terms https://www.dvidshub.net/about/copyright",
+        "attribution": "Joseph Prouse / U.S. Air National Guard / 129th Rescue Wing",
+        "source": "https://www.dvidshub.net/video/550690/hurricane-irma",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "public_domain",
+        "reuse_evidence": "Official DVIDS item labels this recording PUBLIC DOMAIN and credits federal personnel. Retain source credit and non-endorsement disclaimer. Source audio removed.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "aerial",
+          "damage",
+          "coast"
+        ],
+        "event_id": "AL112017",
+        "location": "Florida Keys, Florida",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": "2017-09-11",
+        "reference": "https://www.dvidshub.net/video/550690/hurricane-irma",
+        "preferred_trim_start": 1
+      },
+      "shots": [
+        {
+          "id": "550690-01",
+          "start": 1,
+          "seconds": 3.5,
+          "description": "Aerial view of damaged neighborhood",
+          "camera_family": "550690-same-camera"
+        }
+      ]
+    },
+    {
+      "id": "549583",
+      "title": "Key West coastal waves before Irma",
+      "path": ".local/footage-expansion/prepared/549583.mp4",
+      "checksum": "563307f960f90350c48003c4ab73bfc1345656747fd3f1f74266ddab0a9d13fb",
+      "source_checksum": "ebfb62bf18b7d991d025d1d63f507fff7b9d6ce579ac6878cd87cdb42d98aeaa",
+      "source_page_checksum": "c16a4a082d05532dfdb8e45788899eef5a5b1c8d7ae4809928f7e9f57dd7cf3b",
+      "download_url": "https://d34w7g4gy10iej.cloudfront.net/video/1709/DOD_104819677/DOD_104819677-1024x576-1769k.mp4",
+      "seconds": 12.4,
+      "width": 1024,
+      "height": 576,
+      "changes": "Source audio removed; video stream retained",
+      "metadata": {
+        "name": "Key West coastal waves before Irma \u2014 archive.mp4",
+        "kind": "video",
+        "context": "archival",
+        "license": "Public domain (United States); source terms https://www.dvidshub.net/about/copyright",
+        "attribution": "U.S. Navy / released video",
+        "source": "https://www.dvidshub.net/video/549583/waves-key-west-ahead-hurricane-irma",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "public_domain",
+        "reuse_evidence": "Official DVIDS item labels this recording PUBLIC DOMAIN and credits federal personnel. Retain source credit and non-endorsement disclaimer. Source audio removed.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "waves",
+          "coast",
+          "wind"
+        ],
+        "event_id": "AL112017",
+        "location": "Key West, Florida",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": "2017-09-09",
+        "reference": "https://www.dvidshub.net/video/549583/waves-key-west-ahead-hurricane-irma",
+        "preferred_trim_start": 1
+      },
+      "shots": [
+        {
+          "id": "549583-01",
+          "start": 1,
+          "seconds": 3.5,
+          "description": "Waves reaching coastal walkway",
+          "camera_family": "549583-same-camera"
+        },
+        {
+          "id": "549583-02",
+          "start": 7,
+          "seconds": 3.5,
+          "description": "Breaking surf and coastal palms",
+          "camera_family": "549583-same-camera"
+        }
+      ]
+    },
+    {
+      "id": "939451",
+      "title": "Gulf offshore rough seas during Milton",
+      "path": ".local/footage-expansion/prepared/939451.mp4",
+      "checksum": "38ce7a5ce8b45e3750aa2a2b84e19a846a6417ba0db3db2427cae035f99a91cd",
+      "source_checksum": "0b2e9ed35b4e32fd966aee2a8b3a05028d7447bf8034c0a8bc5e8f52045a4f03",
+      "source_page_checksum": "0da5e2ca784f74d7bceb090098807c1e2728cb43d05e028c4ea2015e614b7cf3",
+      "download_url": "https://d34w7g4gy10iej.cloudfront.net/video/2410/DOD_110609698/DOD_110609698.mp4",
+      "seconds": 43.533333,
+      "width": 848,
+      "height": 480,
+      "changes": "Source audio removed; video stream retained",
+      "metadata": {
+        "name": "Gulf offshore rough seas during Milton \u2014 archive.mp4",
+        "kind": "video",
+        "context": "archival",
+        "license": "Public domain (United States); source terms https://www.dvidshub.net/about/copyright",
+        "attribution": "Benjamin Yahle / U.S. Coast Guard",
+        "source": "https://www.dvidshub.net/video/939451/coast-guard-prepares-hurricane-milton",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "public_domain",
+        "reuse_evidence": "Official DVIDS item labels this recording PUBLIC DOMAIN and credits federal personnel. Retain source credit and non-endorsement disclaimer. Source audio removed.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "waves",
+          "rough_sea",
+          "offshore"
+        ],
+        "event_id": "AL142024",
+        "location": "Gulf of Mexico; offshore, not a Florida land location",
+        "region_codes": [],
+        "location_reviewed": false,
+        "captured_at": "2024-10-07",
+        "reference": "https://www.dvidshub.net/video/939451/coast-guard-prepares-hurricane-milton",
+        "preferred_trim_start": 2
+      },
+      "shots": [
+        {
+          "id": "939451-01",
+          "start": 2,
+          "seconds": 3.5,
+          "description": "Dark rough seas from cutter",
+          "camera_family": "939451-same-camera"
+        },
+        {
+          "id": "939451-02",
+          "start": 36,
+          "seconds": 3.5,
+          "description": "Spray and rough offshore water",
+          "camera_family": "939451-same-camera"
+        }
+      ]
+    },
+    {
+      "id": "pexels-15820691",
+      "title": "Miami Beach coast illustration",
+      "path": ".local/florida/media/15820691.mp4",
+      "checksum": "b7e52f6af31bcc0b59f33287bf1f5fab147d9005c8ab8a4ac2a5cb6393f3635e",
+      "seconds": 34.633333,
+      "metadata": {
+        "name": "Miami Beach \u2014 15820691 illustrative.mp4",
+        "kind": "video",
+        "context": "illustrative",
+        "license": "Pexels License https://www.pexels.com/license/",
+        "attribution": "paashuu / Pexels",
+        "source": "https://www.pexels.com/video/the-beach-and-city-skyline-from-an-aerial-view-15820691/",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "stock_license",
+        "reuse_evidence": "Source page description identifies Miami Beach; visually reviewed coastline; publication date is not capture date. Later stock footage, not event evidence.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "coast",
+          "aerial",
+          "illustrative"
+        ],
+        "event_id": "",
+        "location": "Miami Beach",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": null,
+        "reference": "https://www.pexels.com/video/the-beach-and-city-skyline-from-an-aerial-view-15820691/",
+        "preferred_trim_start": 0
+      },
+      "shots": [
+        {
+          "id": "pexels-15820691-01",
+          "start": 0,
+          "seconds": 3.5,
+          "description": "Miami Beach aerial context",
+          "camera_family": "pexels-15820691"
+        }
+      ]
+    },
+    {
+      "id": "pexels-33840195",
+      "title": "West Palm Beach coast illustration",
+      "path": ".local/florida/media/33840195.mp4",
+      "checksum": "20f2d80940c07d40a310dbfec7b1222b19eb8dcaba6d3566a3314e655e71563e",
+      "seconds": 31.366667,
+      "metadata": {
+        "name": "West Palm Beach \u2014 33840195 illustrative.mp4",
+        "kind": "video",
+        "context": "illustrative",
+        "license": "Pexels License https://www.pexels.com/license/",
+        "attribution": "Chris TheIsland / Pexels",
+        "source": "https://www.pexels.com/video/aerial-view-of-west-palm-beach-coastline-33840195/",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "stock_license",
+        "reuse_evidence": "Source page description identifies West Palm Beach; visually reviewed coastline; publication date is not capture date. Later stock footage, not event evidence.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "coast",
+          "aerial",
+          "illustrative"
+        ],
+        "event_id": "",
+        "location": "West Palm Beach",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": null,
+        "reference": "https://www.pexels.com/video/aerial-view-of-west-palm-beach-coastline-33840195/",
+        "preferred_trim_start": 0
+      },
+      "shots": [
+        {
+          "id": "pexels-33840195-01",
+          "start": 0,
+          "seconds": 3.5,
+          "description": "West Palm Beach aerial context",
+          "camera_family": "pexels-33840195"
+        }
+      ]
+    },
+    {
+      "id": "pexels-9431769",
+      "title": "Miami coastline coast illustration",
+      "path": ".local/florida/media/9431769.mp4",
+      "checksum": "28eb0721b6d5e7f019f41167c996d8ace1565dd8ae0653438e4e50f0e4e6e22c",
+      "seconds": 14.666667,
+      "metadata": {
+        "name": "Miami coastline \u2014 9431769 illustrative.mp4",
+        "kind": "video",
+        "context": "illustrative",
+        "license": "Pexels License https://www.pexels.com/license/",
+        "attribution": "Mikhail Nilov / Pexels",
+        "source": "https://www.pexels.com/video/drone-footage-of-a-beach-9431769/",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "stock_license",
+        "reuse_evidence": "Source page description identifies Miami coastline; visually reviewed coastline; publication date is not capture date. Later stock footage, not event evidence.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "coast",
+          "aerial",
+          "illustrative"
+        ],
+        "event_id": "",
+        "location": "Miami coastline",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": null,
+        "reference": "https://www.pexels.com/video/drone-footage-of-a-beach-9431769/",
+        "preferred_trim_start": 0
+      },
+      "shots": [
+        {
+          "id": "pexels-9431769-01",
+          "start": 0,
+          "seconds": 3.5,
+          "description": "Miami coastline aerial context",
+          "camera_family": "pexels-9431769"
+        }
+      ]
+    },
+    {
+      "id": "pexels-15999293",
+      "title": "Miami Beach coast illustration",
+      "path": ".local/florida/media/15999293.mp4",
+      "checksum": "a0e38130794fd3b6644fe0f0ec4d07de35bd500b8443821e13e3961581c6d846",
+      "seconds": 14.846667,
+      "metadata": {
+        "name": "Miami Beach \u2014 15999293 illustrative.mp4",
+        "kind": "video",
+        "context": "illustrative",
+        "license": "Pexels License https://www.pexels.com/license/",
+        "attribution": "paashuu / Pexels",
+        "source": "https://www.pexels.com/video/the-beach-and-city-of-miami-from-an-aerial-view-15999293/",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "stock_license",
+        "reuse_evidence": "Source page description identifies Miami Beach; visually reviewed coastline; publication date is not capture date. Later stock footage, not event evidence.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "coast",
+          "aerial",
+          "illustrative"
+        ],
+        "event_id": "",
+        "location": "Miami Beach",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": null,
+        "reference": "https://www.pexels.com/video/the-beach-and-city-of-miami-from-an-aerial-view-15999293/",
+        "preferred_trim_start": 0
+      },
+      "shots": [
+        {
+          "id": "pexels-15999293-01",
+          "start": 0,
+          "seconds": 3.5,
+          "description": "Miami Beach aerial context",
+          "camera_family": "pexels-15999293"
+        }
+      ]
+    },
+    {
+      "id": "pexels-31040646",
+      "title": "Panama City Beach, Florida coast illustration",
+      "path": ".local/forecast-news/media/31040646.mp4",
+      "checksum": "f015bb5696bbee7fc58523cc370b3ae169ca2c6c9fd78e551ad7141fae86efec",
+      "seconds": 30.5305,
+      "metadata": {
+        "name": "Panama City Beach, Florida \u2014 31040646 illustrative.mp4",
+        "kind": "video",
+        "context": "illustrative",
+        "license": "Pexels License https://www.pexels.com/license/",
+        "attribution": "Jabriel / Pexels",
+        "source": "https://www.pexels.com/video/aerial-view-of-panama-city-beach-at-sunrise-31040646/",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "stock_license",
+        "reuse_evidence": "Source description identifies Panama City Beach, Florida at sunrise. Later stock footage, not event evidence.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "coast",
+          "aerial",
+          "illustrative"
+        ],
+        "event_id": "",
+        "location": "Panama City Beach, Florida",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": null,
+        "reference": "https://www.pexels.com/video/aerial-view-of-panama-city-beach-at-sunrise-31040646/",
+        "preferred_trim_start": 0
+      },
+      "shots": [
+        {
+          "id": "pexels-31040646-01",
+          "start": 0,
+          "seconds": 3.5,
+          "description": "Panama City Beach, Florida aerial context",
+          "camera_family": "pexels-31040646"
+        }
+      ]
+    },
+    {
+      "id": "pexels-2425846",
+      "title": "Panama City Beach, Florida coast illustration",
+      "path": ".local/forecast-news/media/2425846.mp4",
+      "checksum": "c4544af9f69a8666cb29ce6f7fd4b55e10f80127eca5c707505b61840682fe8b",
+      "seconds": 15.015,
+      "metadata": {
+        "name": "Panama City Beach, Florida \u2014 2425846 illustrative.mp4",
+        "kind": "video",
+        "context": "illustrative",
+        "license": "Pexels License https://www.pexels.com/license/",
+        "attribution": "Ruvim M / Pexels",
+        "source": "https://www.pexels.com/video/aerial-view-of-a-beach-waterfront-2425846/",
+        "rights_confirmed": true,
+        "source_provider": "stock",
+        "reuse_basis": "stock_license",
+        "reuse_evidence": "Source page location tag: Panama City Beach. Visually reviewed matching Florida beachfront. Later stock footage, not event evidence.",
+        "preferred_clip_seconds": 3.5
+      },
+      "catalog": {
+        "tags": [
+          "coast",
+          "aerial",
+          "illustrative"
+        ],
+        "event_id": "",
+        "location": "Panama City Beach, Florida",
+        "region_codes": [
+          "FL"
+        ],
+        "location_reviewed": true,
+        "captured_at": null,
+        "reference": "https://www.pexels.com/video/aerial-view-of-a-beach-waterfront-2425846/",
+        "preferred_trim_start": 0
+      },
+      "shots": [
+        {
+          "id": "pexels-2425846-01",
+          "start": 0,
+          "seconds": 3.5,
+          "description": "Panama City Beach, Florida aerial context",
+          "camera_family": "pexels-2425846"
+        }
+      ]
+    }
+  ],
+  "pending": [
+    {
+      "title": "Miami Shores Hurricane Irma / Sonny A",
+      "source": "https://www.youtube.com/watch?v=mp0KGHcidos",
+      "evidence": "https://commons.wikimedia.org/wiki/File:Hurricane_Irma.webm",
+      "license": "CC BY 3.0",
+      "license_review_date": "2017-11-26",
+      "status": "License verified; download unavailable (Commons DNS); not imported or counted",
+      "reported_date": "2017-09-09",
+      "orientation": "Portrait 406x720; use inset, do not stretch"
+    }
+  ],
+  "editorial_rules": [
+    "Never identify an archival storm as the current forecast or as another historical storm.",
+    "Treat source duration as available material, not unique usable edited coverage.",
+    "Use each short cut at most once per episode; do not place the same camera family back-to-back.",
+    "Alternate footage with source-linked local measurements, maps and explainers; avoid repeated aerial montage.",
+    "Keep Gulf offshore material separate from Florida land observations.",
+    "Do not use an archived radar screen as a current forecast.",
+    "Use silent footage; do not republish package music or interviews without separate review."
+  ],
+  "non_endorsement_disclaimer": "The appearance of U.S. Department of War (DoW) visual information does not imply or constitute DoW endorsement."
+}

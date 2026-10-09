@@ -26,6 +26,7 @@ The initial channel is **US Extreme Weather**. No paid API or existing Semantic 
 - Twelve-chapter one-hour deep-dive planning, content/repetition audit and six reusable source-bound motion graphic styles. The full hour requires expanded content and final assembly; see [One-hour program](docs/ONE_HOUR_PROGRAM.md).
 - Revision-bound visual plans with presentation-only scene CSV import/export.
 - Licensed local image/video/audio imports with measured durations, provenance, duplicate detection and checksum validation.
+- Expanded Florida footage bank with event/location metadata and 46 short cut ranges across archival weather, damage, cleanup, relief and coastal illustration. See [Footage bank](docs/FOOTAGE_BANK.md).
 - Revision-bound production timelines with manual timing, clip trimming, source-linked captions and optional imported narration.
 - Background 1080p H.264/AAC renders, preview/download, source/license manifests, cancellation, scene-cache retry and output quality checks.
 - Electron backend ownership, loopback-only access, readiness checks, isolated renderer, and process cleanup.

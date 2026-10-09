@@ -61,3 +61,7 @@ MediaWiki reference: [Imageinfo](https://www.mediawiki.org/wiki/API:Imageinfo)
 and [Videoinfo](https://www.mediawiki.org/wiki/Extension:TimedMediaHandler/API).
 Source records for the reviewed clips are bundled in
 `backend/app/data/discovery-seeds.json` and described in [MIXED_SAMPLE.md](MIXED_SAMPLE.md).
+
+## Expanded Florida local bank
+
+[Footage bank](FOOTAGE_BANK.md) documents seven new official archival recordings, six existing location-reviewed stock recordings, and a checksum-validated importer. The curated bank is separate from live discovery seeds; it does not widen the remote downloader allowlist. Its licensed Miami Shores YouTube candidate remains pending download and is not counted as usable footage.
