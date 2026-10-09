@@ -90,6 +90,22 @@ UI tests own both servers, use a fresh temporary database per run, and refuse oc
 
 See [Phase 5](docs/PHASE_5.md) for local production, and [Phase 4](docs/PHASE_4.md) for source projection, timestamp, map resolution and current access limits. Optional model configuration and its limitations are described in [Phase 3](docs/PHASE_3.md). Default drafting is local and works without an API key. Live Ollama/Gemini access has not been validated.
 
+## Manual voiceover
+
+In **Script Editor**, use **Copy script** to record narration with your preferred tool.
+In **Video Production**, choose or prepare a scene plan, then use **Upload your voiceover**.
+Its copy button includes the exact scene narration, including any rewritten story draft.
+Upload WAV, MP3, M4A, FLAC or OGG (up to 250 MiB and one hour); the app validates
+the file, measures its duration, and selects it for the timeline. Listen to the audio,
+use **Fit timing to audio**, confirm it matches the script, then check, save and render.
+This uses local processing and no paid generation service.
+
+Timing fit distributes whole video frames across scenes (1–120 seconds per scene).
+It clears the fixed 30/60/90-second template. Review scene changes manually: it does
+not transcribe speech or detect sentence boundaries. Timed footage sequences need
+manual cut adjustments; insufficient footage is caught by the existing timing checks.
+Choosing a different plan clears the narration selection and its confirmation.
+
 ## Storage and configuration
 
 - Development database: `.local/data/studio.sqlite3` (ignored).

@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {CheckCheck, Clock3, Download, ExternalLink, FileText, History, Pencil, Save, ShieldCheck, X} from 'lucide-react';
+import {CheckCheck, Clock3, Copy, Download, ExternalLink, FileText, History, Pencil, Save, ShieldCheck, X} from 'lucide-react';
 import {api} from '../api';
 import type {Claim, Script} from '../contracts';
 
@@ -31,6 +31,7 @@ function ClaimCard({claim, script, name, busy, onMutation}: {claim: Claim; scrip
 
 export default function ScriptEditor({script, scripts, busy, onSelect, onMutation}: {script?: Script; scripts: Script[]; busy: boolean; onSelect:(id: string) => void; onMutation: Mutation}) {
   const [editing, setEditing] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
   const [text, setText] = useState(script?.text ?? '');
   const [baseRevision, setBaseRevision] = useState(script?.revision ?? 1);
   const [editor, setEditor] = useState('');
@@ -59,6 +60,7 @@ export default function ScriptEditor({script, scripts, busy, onSelect, onMutatio
     <div className="revision-toolbar"><div><label className="field-label" htmlFor="revision-select">REVISION HISTORY</label><select id="revision-select" value={history?.revision ?? 'latest'} onChange={e => {void browse(e.target.value);}} disabled={editing || busy}><option value="latest">Latest · revision {script.revision}</option>{script.versions.map(value => <option key={value.revision} value={value.revision}>Revision {value.revision} · {value.editor}</option>)}</select></div><span className="pill">{shown.engine}</span></div>
     {historyError && <p role="alert">{historyError}</p>}{history && <div className="review-note"><History size={14}/>Viewing immutable revision {history.revision}. Select Latest to edit or approve.</div>}
     <div className="script-heading"><h2>{shown.title}</h2><span className="pill amber">{nice(shown.label)}</span></div><div className="script-meta"><span><Clock3 size={14}/>~{shown.estimated_seconds}s estimated · no audio yet</span><span>{date(shown.source_issued_at)}</span></div>
+    {!editing && <><button className="button secondary" onClick={() => {void navigator.clipboard.writeText(shown.text).then(() => setCopyStatus('Script copied. Upload your recording in Video Production after choosing a scene plan.')).catch(() => setCopyStatus('Select the narration text below and copy it manually.'));}}><Copy size={15}/>Copy script</button>{copyStatus && <p role="status">{copyStatus}</p>}</>}
     {!editing ? <><article className="script-text">{shown.text.split('\n\n').map((paragraph, i) => <p key={i}>{paragraph}</p>)}</article>{!history && <button className="button secondary" disabled={busy} onClick={() => {setText(script.text); setBaseRevision(script.revision); setEditing(true);}}><Pencil size={15}/>Edit narration</button>}</> : <div className="narration-edit">
       {script.revision !== baseRevision && <p className="feed-error">A newer revision is available. Your unsaved text is preserved; reload the latest revision before saving.</p>}
       <label className="field-label" htmlFor="narration-text">NARRATION TEXT</label><textarea id="narration-text" value={text} onChange={e => setText(e.target.value)} rows={18}/><p className="muted">Separate paragraphs with a blank line. Preserve the opening source context. Edited claims require source support.</p>
