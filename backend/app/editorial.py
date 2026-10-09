@@ -73,7 +73,8 @@ def reset_review(document: dict):
 
 def rebuild_scenes(document: dict):
     template = document['grounded_scenes'][0]
-    document['scenes'] = [{**copy.deepcopy(template), 'id':f'scene-{i+1}', 'script_segment':claim['text'],
+    templates = {normalized(scene['script_segment']):scene for scene in reversed(document['grounded_scenes'])}
+    document['scenes'] = [{**copy.deepcopy(templates.get(normalized(claim['text']), template)), 'id':f'scene-{i+1}', 'script_segment':claim['text'],
         'target_seconds':round(len(claim['text'].split()) / 145 * 60, 1), 'claim_id':claim['id']} for i, claim in enumerate(document['claims'])]
     document['estimated_seconds'] = round(len(document['text'].split()) / 145 * 60)
 
@@ -102,7 +103,9 @@ def attest(document: dict, body, evidence: list[Advisory]) -> dict:
 def evaluate(document: dict, intelligence, evidence: list[Advisory], review=None) -> dict:
     result = copy.deepcopy(document)
     primary = evidence[0]
-    label = intelligence.status(primary)
+    selected = document.get('selected_advisory_ids', [primary.id])
+    statuses = [intelligence.status(intelligence.by_id[identity]) for identity in selected]
+    label = next((status for status in statuses if status != 'current'), 'current')
     official = all(item.provenance == 'official_fetch' for item in evidence)
     if label == 'current' and not official:
         label = 'unverified'
@@ -141,7 +144,7 @@ def evaluate(document: dict, intelligence, evidence: list[Advisory], review=None
     if not official or not unchanged:
         issues.append({'code':'evidence_restricted', 'blocking':True, 'message':'All source evidence must retain official provenance and original checksums.'})
     result['editorial'] = {'issues':issues, 'can_review':current and official and unchanged and covered and safety,
-        'high_impact':primary.severity in ('Extreme', 'Severe') or bool(primary.warnings),
+        'high_impact':any(intelligence.by_id[identity].severity in ('Extreme', 'Severe') or bool(intelligence.by_id[identity].warnings) for identity in selected),
         'human_review_required':True, 'timing_basis':'145 words/minute estimate; audio not generated',
         'claim_validation':'Generated blocks are source-grounded; free edits require explicit human quote-based verification.'}
     result['review_valid'] = valid_review

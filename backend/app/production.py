@@ -99,8 +99,27 @@ class Production:
                 'benchmark': self.benchmark_info(), 'complete_episode': self.episode_info(),
                 'hour_graphics': self.hour_graphics_info(), 'documentary': self.documentary_info(),
                 'regional_chapter': self.regional_chapter_info(),
-                'forecast_news': self.forecast_news_info(),
+                'forecast_news': self.forecast_news_info(), 'user_report': self.user_report_info(),
                 'regions': regional.options(), 'regional_coverage': regional.coverage(self.store.visual_plans(), self.store.production_list('media'))}
+
+    def user_report_info(self):
+        folder = Path(__file__).resolve().parents[2] / '.local/exports/user-voiceover-v2'
+        try:
+            manifest = json.loads((folder / 'manifest.json').read_text())
+            return {'available':(folder / 'isaias-user-voiceover-v2.mp4').is_file(),
+                    'title':'Your voiceover · geographic weather edit', 'seconds':manifest['output']['seconds'],
+                    'shots':len(manifest['shots']), 'visual_revision':manifest['visual_revision']}
+        except (OSError,ValueError,KeyError):
+            return {'available':False}
+
+    def user_report_path(self, kind):
+        names = {'video':'isaias-user-voiceover-v2.mp4','manifest':'manifest.json','subtitles':'captions.srt'}
+        if kind not in names:raise ValueError('Unknown narrated report artifact.')
+        folder = Path(__file__).resolve().parents[2] / '.local/exports/user-voiceover-v2'
+        manifest = json.loads((folder / 'manifest.json').read_text())
+        if checksum(folder / names['video']) != manifest['output']['checksum']:
+            raise ValueError('Narrated report changed after validation; render it again.')
+        return folder / names[kind]
 
     def forecast_news_info(self):
         from .forecast_news import snapshot_status
@@ -314,6 +333,8 @@ class Production:
         from .story import build
         plan = self.store.visual_plan(body.plan_id)
         script = self.validate_plan(plan)
+        if len(script.get('selected_advisory_ids', [])) > 1:
+            raise ValueError('Combined drafts already preserve topic order. Edit their narration directly instead of applying a single-storm story rewrite.')
         if plan.get('story_version'):
             raise ValueError('This plan already contains a story draft. Select the original plan to rebuild.')
         result = build({**plan, 'source_label':script['label']}, self.store.advisory(script['advisory_id']))
@@ -370,6 +391,8 @@ class Production:
     def create_timeline(self, body, persist=True):
         plan = self.store.visual_plan(body.plan_id)
         script = self.validate_plan(plan)
+        if len(script.get('selected_advisory_ids', [])) > 1 and body.presentation != 'broadcast':
+            raise ValueError('Combined topics require Broadcast style to retain each topic’s source geography.')
         if body.presentation == 'cinematic' and (not body.satellite_context or any(s.media_id for s in body.scenes)):
             raise ValueError('Cinematic presentation requires satellite context and no imported scene media.')
         if body.music and body.narration_id:
@@ -425,9 +448,13 @@ class Production:
                            'cuts': cuts,
                            'selection_catalog': asset.get('catalog', {}) if asset else {},
                            'observations': observations if not asset else []})
+        from .location_labels import apply as apply_places
+        for scene in scenes:
+            apply_places(scene['parameters'], self.store.advisory(scene['parameters'].get('source_advisory_id',script['advisory_id'])),scene['script_segment'])
         if body.presentation == 'broadcast':
             advisory = self.store.advisory(script['advisory_id'])
             for scene in scenes:
+                advisory = self.store.advisory(scene['parameters'].get('source_advisory_id', script['advisory_id']))
                 source = broadcast.VisualSource(source_url=advisory.source_url, checksum=advisory.checksum,
                     event_id=advisory.event_key, data_type='reported_center', historical=script['label'] != 'current',
                     observation_start=advisory.issued_at, observation_end=advisory.issued_at,

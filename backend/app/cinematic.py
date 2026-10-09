@@ -72,6 +72,8 @@ def beats(timeline, scene):
 
 def frames(timeline, scene, directory, observation_path):
     shots = beats(timeline, scene)
+    from .location_labels import locator
+    locator_image = locator(scene.get('parameters',{}))
     observations = scene['observations']
     # Full-frame native imagery crops are presentation crops, never map overlays.
     for index, observation in enumerate(observations):
@@ -142,6 +144,8 @@ def frames(timeline, scene, directory, observation_path):
             draw.multiline_text((x, 345), lines, font=fonts[size], fill='#ffffff', spacing=12)
             detail_y = min(820, 355+len(lines.splitlines())*(size+12)+45)
         draw.multiline_text((x, detail_y), '\n'.join(textwrap.wrap(shot['detail'], 66)), font=fonts[26], fill='#b5d5e4', spacing=7)
+        if locator_image is not None:
+            image.alpha_composite(locator_image,(1280,575))
         # A restrained moving rail keeps timing visible without looking like app controls.
         y=925
         width=1260/len(shots)

@@ -346,6 +346,13 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         path = app.state.production.episode_path(kind)
         return FileResponse(path, media_type='video/mp4' if kind == 'video' else 'application/json')
 
+    @app.get('/api/production/user-report/{kind}')
+    def narrated_user_report(kind: str, download: bool = False):
+        if kind not in ('video','manifest','subtitles') or not app.state.production.user_report_info()['available']:
+            raise HTTPException(status_code=404,detail='Narrated report unavailable.')
+        path=app.state.production.user_report_path(kind)
+        return FileResponse(path,media_type={'video':'video/mp4','manifest':'application/json','subtitles':'application/x-subrip'}[kind],filename=path.name if download else None)
+
     @app.get('/api/production/forecast-news/{kind}')
     def recorded_forecast_news(kind: str):
         if kind not in ('video', 'manifest', 'subtitles', 'narration') or not app.state.production.forecast_news_info()['available']:

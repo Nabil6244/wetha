@@ -1,5 +1,6 @@
 """Six deterministic newsroom roles with typed JSON handoffs and durable activity."""
 import asyncio
+import copy
 from typing import Literal
 from pydantic import BaseModel, ConfigDict
 from .contracts import Advisory, Change
@@ -16,6 +17,7 @@ class Packet(BaseModel):
 
 
 class EvidencePacket(Packet):
+    selected_advisory_ids: list[str] = []
     as_of: str
     advisories: list[Advisory]
     feeds: list[dict]
@@ -23,6 +25,7 @@ class EvidencePacket(Packet):
 
 
 class ChangePacket(Packet):
+    topics: list[dict] = []
     advisory_id: str
     previous_id: str | None
     comparison: dict
@@ -30,12 +33,14 @@ class ChangePacket(Packet):
 
 
 class PriorityPacket(Packet):
+    topics: list[dict] = []
     advisory_id: str
     event_id: str
     priority: dict
 
 
 class VerificationPacket(Packet):
+    topics: list[dict] = []
     advisory_id: str
     status: str
     checks: list[dict]
@@ -62,15 +67,23 @@ class WeatherDataCollector:
 
     async def run(self, store, collector, request) -> EvidencePacket:
         results = []
+        ids = request.advisory_ids or [request.advisory_id]
         if request.refresh_sources:
-            feed = store.advisory(request.advisory_id).provider.lower()
-            if feed not in ('nws', 'nhc'):
+            feeds = {store.advisory(identity).provider.lower() for identity in ids}
+            if not feeds <= {'nws', 'nhc'}:
                 raise ValueError('Training evidence has no official feed to refresh.')
-            results = [await collector.refresh(feed)]
+            for feed in sorted(feeds):
+                results.append(await collector.refresh(feed))
         intelligence = IntelligenceDesk(store.advisories(), store.feeds(), store.memberships())
-        primary = intelligence.by_id[request.advisory_id]
-        prior = intelligence.previous(primary)
-        return EvidencePacket(as_of=now(), advisories=[primary] + ([prior] if prior else []), feeds=store.feeds(), source_refresh=results)
+        preserved = {}
+        for identity in ids:
+            primary = intelligence.by_id[identity]
+            preserved[primary.id] = primary
+            prior = intelligence.previous(primary)
+            if prior:
+                preserved[prior.id] = prior
+        # Selected order is independent of comparison evidence order.
+        return EvidencePacket(as_of=now(), selected_advisory_ids=ids, advisories=list(preserved.values()), feeds=store.feeds(), source_refresh=results)
 
 
 class ChangeDetector:
@@ -78,7 +91,7 @@ class ChangeDetector:
 
     def run(self, evidence: EvidencePacket, intelligence) -> ChangePacket:
         described = intelligence.describe(evidence.advisories[0])
-        return ChangePacket(advisory_id=described['id'], previous_id=described['previous_id'], comparison=described['comparison'], changes=described['changes'])
+        return ChangePacket(advisory_id=described['id'], previous_id=described['previous_id'], comparison=described['comparison'], changes=described['changes'], topics=[{k: intelligence.describe(intelligence.by_id[identity])[k] for k in ('id','previous_id','comparison','changes')} for identity in evidence.selected_advisory_ids])
 
 
 class NewsPrioritizer:
@@ -86,7 +99,7 @@ class NewsPrioritizer:
 
     def run(self, evidence: EvidencePacket, intelligence) -> PriorityPacket:
         described = intelligence.describe(evidence.advisories[0])
-        return PriorityPacket(advisory_id=described['id'], event_id=described['event_id'], priority=described['priority'])
+        return PriorityPacket(advisory_id=described['id'], event_id=described['event_id'], priority=described['priority'], topics=[{k: intelligence.describe(intelligence.by_id[identity])[k] for k in ('id','event_id','priority')} for identity in evidence.selected_advisory_ids])
 
 
 class FactVerifier:
@@ -97,17 +110,51 @@ class FactVerifier:
         checked = intelligence.verification(primary)
         manifest = [{'id':item.id, 'checksum':item.checksum, 'source_url':item.source_url, 'issued_at':item.issued_at.isoformat(),
             'expires_at':item.expires_at.isoformat() if item.expires_at else None, 'provenance':item.provenance} for item in evidence.advisories]
-        checks = checked['checks'] + [{'check':'Official comparison evidence', 'passed':all(item.provenance == 'official_fetch' for item in evidence.advisories)}]
-        return VerificationPacket(advisory_id=primary.id, status='verified_source' if all(row['passed'] for row in checks) else 'restricted', checks=checks, evidence_manifest=manifest)
+        topics = [{'advisory_id':identity, **intelligence.verification(intelligence.by_id[identity])} for identity in evidence.selected_advisory_ids]
+        checks = [{'check': (identity + ': ' if len(evidence.selected_advisory_ids) > 1 else '') + check['check'], 'passed':check['passed']} for identity in evidence.selected_advisory_ids for check in intelligence.verification(intelligence.by_id[identity])['checks']] + [{'check':'Official comparison evidence', 'passed':all(item.provenance == 'official_fetch' for item in evidence.advisories)}]
+        return VerificationPacket(advisory_id=primary.id, status='verified_source' if all(row['passed'] for row in checks) else 'restricted', checks=checks, evidence_manifest=manifest, topics=topics)
 
 
 class AIScriptwriter:
     name = 'Scriptwriter'
 
     async def run(self, evidence: EvidencePacket, intelligence, engine, model_transport=None):
-        primary = evidence.advisories[0]
-        prior = evidence.advisories[1] if len(evidence.advisories) > 1 else None
-        document = prepare(GroundedScriptWriter().generate(primary, prior, intelligence.status(primary)), evidence.advisories)
+        ids = evidence.selected_advisory_ids or [evidence.advisories[0].id]
+        documents = []
+        for identity in ids:
+            primary = intelligence.by_id[identity]
+            prior = intelligence.previous(primary)
+            sources = [primary] + ([prior] if prior else [])
+            part = prepare(GroundedScriptWriter().generate(primary, prior, intelligence.status(primary)), sources)
+            for claim in part['claims']:
+                claim['primary_advisory_id'] = identity
+            for scene in part['grounded_scenes']:
+                scene['parameters']['source_advisory_id'] = identity
+            documents.append(part)
+        document = documents[0]
+        if len(documents) > 1:
+            document = copy.deepcopy(document)
+            document['title'] = f"Weather roundup · {len(ids)} topics"
+            document['selected_advisory_ids'] = ids
+            document['chapters'] = [{'advisory_id':identity, 'title':intelligence.by_id[identity].title, 'area':intelligence.by_id[identity].area} for identity in ids]
+            document['claims'] = []
+            document['grounded_scenes'] = []
+            by_text = {}
+            for part in documents:
+                document['grounded_scenes'].extend(part['grounded_scenes'])
+                for claim in part['claims']:
+                    if claim['text'] in by_text:
+                        retained = by_text[claim['text']]
+                        retained['source_advisory_ids'] = list(dict.fromkeys(retained['source_advisory_ids'] + claim['source_advisory_ids']))
+                    else:
+                        by_text[claim['text']] = claim
+                        document['claims'].append(claim)
+            closing = documents[0]['claims'][-1]['text']
+            document['claims'].sort(key=lambda claim: claim['text'] == closing)
+            document['source_advisory_ids'] = [item.id for item in evidence.advisories]
+            document['source_refs'] = list(dict.fromkeys(item.source_url for item in evidence.advisories))
+            document['evidence_manifest'] = [{'id':item.id,'checksum':item.checksum,'source_url':item.source_url,'issued_at':item.issued_at.isoformat(),'expires_at':item.expires_at.isoformat() if item.expires_at else None,'provenance':item.provenance} for item in evidence.advisories]
+            document['text'] = '\n\n'.join(claim['text'] for claim in document['claims'])
         if engine != 'deterministic':
             # Compose only unique catalogue blocks. Duplicates cannot be selected ambiguously.
             if len({block['id'] for block in document['claims']}) != len(document['claims']):
@@ -135,7 +182,8 @@ class Newsroom:
         self.store, self.collector, self.model_transport = store, collector, model_transport
 
     async def run(self, request) -> dict:
-        self.store.advisory(request.advisory_id)  # Missing IDs must not create phantom runs.
+        for identity in request.advisory_ids or [request.advisory_id]:
+            self.store.advisory(identity)  # Validate every selection before creating a run.
         identity = self.store.start_run(request.advisory_id, request.engine)
         job = self.store.start_job('newsroom')
         sequence = 0

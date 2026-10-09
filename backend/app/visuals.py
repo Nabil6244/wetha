@@ -330,10 +330,14 @@ class VisualEvidence:
         return {'advisory':desk.describe(item),'geojson':{'type':'FeatureCollection','features':features},'timeline':timeline,'omitted':omitted,'note':'Reported centers and original alert polygons. Lines connect advisories; no inferred track, cone, impact area or rainfall.'}
 
     def plan(self,script,style):
-        geography=self.geography(script['advisory_id'])
-        features=geography['geojson']['features'];kinds={f['properties']['kind'] for f in features}
+        geographies={}
         assets=self.state()['assets'];scenes=[];asset_ids=set()
         for index,claim in enumerate(script['claims']):
+            source_id=claim.get('primary_advisory_id', claim['source_advisory_ids'][0] if claim['source_advisory_ids'] else script['advisory_id'])
+            if source_id not in geographies:geographies[source_id]=self.geography(source_id)
+            geography=geographies[source_id]
+            features=geography['geojson']['features'];kinds={f['properties']['kind'] for f in features}
+            source_advisory=self.store.advisory(source_id)
             kind='lower_third';parameters={};fallback='Source attribution card with advisory issue time'
             if index==0:kind='news_intro'
             elif 'Compared with' in claim['text']:kind='what_changed';parameters={'changes':geography['advisory']['changes'],'comparison':geography['advisory']['comparison']}
@@ -343,9 +347,9 @@ class VisualEvidence:
             if style in ('satellite','radar') and index==1:
                 selected=[a for a in reversed(assets) if a['kind']==('goes' if style=='satellite' else 'radar')]
                 # Spatial observations are contextual only; require issue-time proximity and never claim attribution.
-                selected=[a for a in selected if abs((datetime.fromisoformat(a['observed_at'])-datetime.fromisoformat(script['source_issued_at'])).total_seconds())<=3600]
+                selected=[a for a in selected if abs((datetime.fromisoformat(a['observed_at'])-datetime.fromisoformat(source_advisory.issued_at.isoformat())).total_seconds())<=3600]
                 if style=='satellite':
-                    point=next((f['geometry']['coordinates'] for f in features if f['properties']['kind']=='reported_center' and f['properties'].get('advisory_id')==script['advisory_id']),None)
+                    point=next((f['geometry']['coordinates'] for f in features if f['properties']['kind']=='reported_center' and f['properties'].get('advisory_id')==source_id),None)
                     if point is None or not (-100<=point[0]<=-65 and 5<=point[1]<=40):selected=[]
                 elif not any(f['properties']['kind']=='alert_area' for f in features):
                     selected=[]
@@ -354,14 +358,18 @@ class VisualEvidence:
                     parameters={'asset_ids':[a['id'] for a in selected],'observation_times':[a['observed_at'] for a in selected],'note':'Regional observation context; not a claim of event attribution. Satellite scene selection uses an editorial Gulf/Atlantic region filter, not pixel geolocation.'}
                     asset_ids.update(parameters['asset_ids'])
                 else:parameters={'unavailable_requested_layer':style,'reason':'No cached observations close to this script issue time; retain source card fallback.'}
-            scenes.append({'id':f'scene-{index+1}','type':kind,'regional_targets':named_regions(claim['text']),'script_segment':claim['text'],'claim_id':claim['id'],'target_seconds':round(len(claim['text'].split())/145*60,1),'asset_type':kind,'visual_instructions':'Preserve source, timestamps, uncertainty and evidence label; restrained camera movement.','parameters':parameters,'source_refs':script['source_refs'],'advisory_timestamp':script['source_issued_at'],'camera_movement':'ease_to_region' if kind in ('storm_track','cinematic_weather_map') else 'slow_push' if kind=='satellite_timelapse' else 'none','transition':'dissolve','fallback_asset':fallback,'voiceover_alignment':None,'timing_basis':'145 words/minute estimate; audio not generated'})
-        advisory = self.store.advisory(script['advisory_id'])
-        source = broadcast.VisualSource(source_url=advisory.source_url, checksum=advisory.checksum, event_id=advisory.event_key,
-            data_type='reported_center' if advisory.provider=='NHC' else 'historical_analysis', historical=script['label']!='current',
-            observation_start=advisory.issued_at, observation_end=advisory.issued_at, advisory_issue_time=advisory.issued_at,
-            coverage='Source-reported region', projection='EPSG:4326', attribution=advisory.provider,
-            license='Source evidence; original provenance retained', catalogue_url=advisory.source_url)
+            from .location_labels import apply as apply_places
+            apply_places(parameters,source_advisory,claim['text'])
+            parameters.update(source_advisory_id=source_id)
+            parameters.setdefault('geojson', geography['geojson'])
+            scenes.append({'id':f'scene-{index+1}','type':kind,'regional_targets':named_regions(claim['text']),'script_segment':claim['text'],'claim_id':claim['id'],'target_seconds':round(len(claim['text'].split())/145*60,1),'asset_type':kind,'visual_instructions':'Preserve source, timestamps, uncertainty and evidence label; restrained camera movement.','parameters':parameters,'source_refs':[self.store.advisory(identity).source_url for identity in claim['source_advisory_ids']],'advisory_timestamp':source_advisory.issued_at.isoformat(),'camera_movement':'ease_to_region' if kind in ('storm_track','cinematic_weather_map') else 'slow_push' if kind=='satellite_timelapse' else 'none','transition':'dissolve','fallback_asset':fallback,'voiceover_alignment':None,'timing_basis':'145 words/minute estimate; audio not generated'})
         for scene in scenes:
+            advisory = self.store.advisory(scene['parameters']['source_advisory_id'])
+            source = broadcast.VisualSource(source_url=advisory.source_url, checksum=advisory.checksum, event_id=advisory.event_key,
+                data_type='reported_center' if advisory.provider=='NHC' else 'historical_analysis', historical=script['label']!='current',
+                observation_start=advisory.issued_at, observation_end=advisory.issued_at, advisory_issue_time=advisory.issued_at,
+                coverage='Source-reported region', projection='EPSG:4326', attribution=advisory.provider,
+                license='Source evidence; original provenance retained', catalogue_url=advisory.source_url)
             scene['direction'] = broadcast.director(scene, advisory.event_key, max(1,min(120,scene['target_seconds'])), advisory.facts, source)
         document={'id':str(uuid4()),'script_id':script['id'],'script_revision':script['revision'],'script_text_checksum':hashlib.sha256(script['text'].encode()).hexdigest(),'advisory_id':script['advisory_id'],'source_label':script['label'],'evidence_manifest':script['evidence_manifest'],'created_at':now(),'scenes':scenes,'asset_ids':sorted(asset_ids),'broadcast_eligible':False,'rendered':False,'review_valid_at_creation':script['review_valid'],'estimated_seconds':sum(s['target_seconds'] for s in scenes)}
         self.store.save_visual_plan(document)

@@ -46,6 +46,16 @@ class FetchRequest(BaseModel):
 class ScriptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     advisory_id: str
+    advisory_ids: list[str] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode='after')
+    def selected_sources(self):
+        if len(set(self.advisory_ids)) != len(self.advisory_ids):
+            raise ValueError('Select each advisory only once.')
+        if self.advisory_ids and self.advisory_ids[0] != self.advisory_id:
+            raise ValueError('The primary advisory must be the first selected source.')
+        return self
+
     engine: Literal['deterministic', 'ollama', 'gemini'] = 'deterministic'
     refresh_sources: bool = False
 

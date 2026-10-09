@@ -296,3 +296,41 @@ def test_source_update_during_model_request_is_detected_before_editorial_gate(tm
         result=client.post('/api/newsroom/runs',json={'advisory_id':current(client).id,'engine':'ollama'})
         assert result.status_code==200
         assert result.json()['label']=='superseded' and result.json()['editorial']['can_review'] is False
+
+
+def test_multiple_topics_keep_claim_sources_and_scene_geography(client):
+    first = current(client)
+    second = training_advisories()[0].model_copy(update={'id':'training:other-storm','event_key':'other-storm','title':'Second storm in North Carolina','area':'North Carolina','facts':{'wind_mph':45,'pressure_mb':998,'latitude':35.2,'longitude':-76.9}})
+    client.app.state.store.save_advisory(second)
+    response = client.post('/api/newsroom/runs', json={'advisory_id':first.id,'advisory_ids':[first.id,second.id]})
+    assert response.status_code == 200
+    document = response.json()
+    assert document['selected_advisory_ids'] == [first.id, second.id]
+    assert len(document['chapters']) == 2
+    assert 'Second storm in North Carolina' in document['text']
+    assert document['label'] == 'training' and document['editorial']['can_review'] is False
+    assert len({c['id'] for c in document['claims']}) == len(document['claims'])
+    second_claims = [c for c in document['claims'] if c['primary_advisory_id'] == second.id]
+    assert second_claims and all(second.id in c['source_advisory_ids'] for c in second_claims)
+    plan = client.post('/api/visuals/plans', json={'script_id':document['id'],'expected_revision':1}).json()
+    timeline_response = client.post('/api/production/timelines', json={'plan_id':plan['id'],'title':'Multiple-topic test','presentation':'broadcast','scenes':[{'id':s['id'],'seconds':1} for s in plan['scenes']]})
+    assert timeline_response.status_code == 200
+    for scene in timeline_response.json()['scenes']:
+        source_id = scene['parameters']['source_advisory_id']
+        source = first if source_id == first.id else second
+        assert scene['direction']['event_id'] == source.event_key
+        assert scene['parameters']['facts'] == ({} if scene['regional_relevance']['regions'] else source.facts)
+        assert scene['advisory_timestamp'] == source.issued_at.isoformat()
+    run = client.get('/api/newsroom/runs/' + document['run_id']).json()
+    assert len(run['steps']) == 6
+    assert run['steps'][0]['output']['selected_advisory_ids'] == [first.id,second.id]
+    assert len(run['steps'][3]['output']['topics']) == 2
+
+
+def test_multiple_topics_validate_every_id_before_creating_run(client):
+    client.post('/api/training/load')
+    before = len(client.get('/api/dashboard').json()['newsroom']['runs'])
+    for ids, status in [(['training:cyclone:2','missing'],404),(['training:cyclone:2']*2,422),(['training:cyclone:2']*13,422)]:
+        response = client.post('/api/newsroom/runs',json={'advisory_id':'training:cyclone:2','advisory_ids':ids})
+        assert response.status_code == status
+    assert len(client.get('/api/dashboard').json()['newsroom']['runs']) == before

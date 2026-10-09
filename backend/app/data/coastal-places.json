@@ -1,0 +1,63 @@
+{
+  "source_url": "https://mapservices.weather.noaa.gov/tropical/rest/services/tropical/NHC_Breakpoints/MapServer",
+  "collected_on": "2026-10-09",
+  "note": "Official NOAA breakpoint coordinates. Markers identify named locations, not impact or warning polygons. Mississippi spelling normalized from source.",
+  "places": [
+    {
+      "name": "Jefferson/Plaquemines Parish Line",
+      "coordinates": [
+        -89.98,
+        29.46
+      ]
+    },
+    {
+      "name": "Ocean Springs",
+      "coordinates": [
+        -88.82,
+        30.4
+      ]
+    },
+    {
+      "name": "Bay/Gulf County Line",
+      "coordinates": [
+        -85.39,
+        29.93
+      ]
+    },
+    {
+      "name": "Aucilla River",
+      "coordinates": [
+        -83.99,
+        30.09
+      ]
+    },
+    {
+      "name": "Steinhatchee River",
+      "coordinates": [
+        -83.4,
+        29.67
+      ]
+    },
+    {
+      "name": "Yankeetown",
+      "coordinates": [
+        -82.75,
+        29.03
+      ]
+    },
+    {
+      "name": "Progreso",
+      "coordinates": [
+        -89.66,
+        21.29
+      ]
+    },
+    {
+      "name": "Mouth of the Mississippi River",
+      "coordinates": [
+        -89.1,
+        29.12
+      ]
+    }
+  ]
+}

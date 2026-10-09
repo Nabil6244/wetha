@@ -164,7 +164,6 @@ test('newsroom handoffs, revision history and unsupported edits work in the brow
   expect(document.revision).toBe(2);
   expect(document.editorial.can_review).toBe(false);
   await page.screenshot({path:'test-results/phase-3-editor.png',fullPage:true});
-  await page.locator('#production-finish').screenshot({path:'test-results/guided-export.png'});
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
@@ -241,7 +240,6 @@ test('visual director renders real geography, labels missing layers and pins sce
   await page.getByRole('button',{name:'Radar',exact:true}).click();
   await expect(page.locator('.radar-legend')).toContainText('No timestamped radar frames');
   await page.screenshot({path:'test-results/phase-4-visual-director.png',fullPage:true});
-  await page.locator('#production-finish').screenshot({path:'test-results/guided-export.png'});
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.reload();
@@ -552,4 +550,40 @@ test('manual voiceover copies the script, uploads audio and renders with fitted 
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await panel.screenshot({path:'test-results/manual-voiceover.png'});
+});
+
+test('newsroom selects searchable multiple topics and produces one source-linked draft', async ({page,request}) => {
+  await request.post('/api/training/load');
+  await page.goto('/');
+  await page.getByRole('button',{name:'AI Newsroom',exact:true}).click();
+  await page.getByLabel('SOURCE EVIDENCE').selectOption('training:cyclone:2');
+  await page.getByRole('button',{name:'Select multiple topics',exact:true}).click();
+  await page.getByRole('button',{name:'Clear selection',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Build combined draft (0 topics)',exact:true})).toBeDisabled();
+  await page.getByLabel('SEARCH TOPICS OR LOCATIONS').fill('Training Cyclone');
+  const topics=page.getByRole('group',{name:'Select advisory topics'}).getByRole('checkbox');
+  await expect(topics).toHaveCount(2);
+  await topics.nth(0).check();await topics.nth(1).check();
+  await page.getByLabel('SEARCH TOPICS OR LOCATIONS').fill('no-such-location');
+  await expect(page.getByText('No topics match this search.',{exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Build combined draft (2 topics)',exact:true})).toBeEnabled();
+  await page.getByLabel('SEARCH TOPICS OR LOCATIONS').clear();
+  await page.screenshot({path:'test-results/multiple-topic-selection.png',fullPage:true});
+  await page.getByRole('button',{name:'Build combined draft (2 topics)',exact:true}).click();
+  await expect(page.getByRole('status').filter({hasText:'2 topics combined into one draft'})).toBeVisible();
+  await page.getByRole('button',{name:'Open draft',exact:true}).click();
+  await expect(page.locator('.script-text')).toContainText('Training Cyclone');
+  const dashboard=await (await request.get('/api/dashboard')).json();
+  const combined=dashboard.scripts.find((s:{selected_advisory_ids?:string[]}) => s.selected_advisory_ids?.length===2);
+  expect(combined.chapters).toHaveLength(2);
+  expect(combined.broadcast_eligible).toBe(false);
+  await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  const production=await (await request.get('/api/production')).json();
+  if(production.user_report.available){
+    await expect(page.getByLabel('Your narrated geographic weather edit')).toBeVisible();
+    await expect(page.getByRole('link',{name:'Download revised video',exact:true})).toBeVisible();
+    const artifact=await request.get('/api/production/user-report/video',{headers:{Range:'bytes=0-1023'}});
+    expect(artifact.status()).toBe(206);
+    expect((await artifact.body()).length).toBe(1024);
+  }
 });

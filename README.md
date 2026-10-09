@@ -179,3 +179,17 @@ The South Florida historical chapter combines region-reviewed footage, local sta
 ## Forecast-news bulletin
 
 The first current Florida bulletin uses official NWS hourly point forecasts through 72 hours, active alerts, and matching NHC forecast/warning geometry. Recorded editions preserve their source dates and show refresh status. See [Forecast news](docs/FORECAST_NEWS.md) for collection, rendering, source scope and refresh requirements.
+
+## Multiple newsroom topics
+
+In **AI Newsroom**, click **Select multiple topics**, search by location or warning
+type, and check up to 12 advisories. Click **Build combined draft** to create one
+script in selection order. Claims, comparison evidence, issue times and visual
+geography remain tied to their own advisory. Repeated boilerplate is consolidated.
+Any restricted selected source blocks current-news review for the combined draft.
+Use Broadcast style for combined-topic video timelines.
+
+Coastal map labels use official NOAA/NHC breakpoint coordinates. These point
+markers identify places named by the source; they do not infer warning polygons.
+The simple Video Production layout picker also exposes **Satellite report** for
+NOAA imagery and statistics. Satellite frames retain independent observation times.
