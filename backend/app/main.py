@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import io
 import json
@@ -262,6 +263,16 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
     def alignment_status(identity: str):
         return app.state.alignment.get(identity)
 
+    @app.get('/api/production/footage-coverage')
+    def footage_coverage(plan_id: str | None = None):
+        from .footage_library import coverage
+        plan=store.visual_plan(plan_id) if plan_id else None
+        return coverage(store.production_list('media'),plan,store.advisory)
+
+    @app.post('/api/production/media/analyze-shots')
+    async def analyze_footage_shots():
+        return await asyncio.to_thread(app.state.production.analyze_shots)
+
     @app.post('/api/production/find-footage')
     async def find_new_footage(body: FootageExpansionRequest):
         return app.state.footage_expansion.start(body)
@@ -518,7 +529,8 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         if body.narration_id and payload['presentation']=='broadcast' and not plan.get('automatic_shots') and not any(s.get('media_id') or s.get('cuts') for s in payload['scenes']):
             from .automatic_edit import subdivide
             plan,derived,edits=subdivide(plan,job)
-            if len(edits)>600:raise ValueError('This narration needs more than 600 visual shots. Split the program into chapters.')
+            from .contracts import MAX_VISUAL_SCENES
+            if len(edits)>MAX_VISUAL_SCENES:raise ValueError(f'This narration needs more than {MAX_VISUAL_SCENES} visual shots. Split the program into chapters.')
             store.save_visual_plan(plan)
             with app.state.alignment.lock:
                 app.state.alignment.jobs[derived['id']]=derived

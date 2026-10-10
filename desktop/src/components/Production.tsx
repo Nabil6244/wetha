@@ -31,7 +31,7 @@ interface EditDraft {plan_id: string; scenes: SceneEdit[]; seconds: number; temp
 interface Timeline {
   id: string; plan_id: string; title: string; script_revision: number; scenes: (Scene & SceneEdit)[];
   source_label: string; current_source_label: string; superseded: boolean; seconds: number; audio_mode: string;
-  presentation?: 'captioned' | 'cinematic' | 'broadcast'; music?: boolean; narration_id: string | null; narration_verified: boolean; review_valid_now: boolean;
+  presentation?: 'captioned' | 'cinematic' | 'broadcast'; music?: boolean; music_bed?: boolean; narration_id: string | null; narration_verified: boolean; review_valid_now: boolean;
   automatic_graphs?: boolean; template?: Template | null;
 }
 interface Render {
@@ -68,6 +68,7 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
   const [presentation, setPresentation] = useState<'captioned' | 'cinematic' | 'broadcast'>('broadcast');
   const [automaticGraphs, setAutomaticGraphs] = useState(true);
   const [music, setMusic] = useState(false);
+  const [musicBed, setMusicBed] = useState(true);
   const [satelliteContext, setSatelliteContext] = useState(false);
   const [timelineId, setTimelineId] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -148,7 +149,7 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
     const timeline = state?.timelines.find(t => t.id === id);
     setTimelineId(id);
     if (timeline) {
-      setPlanId(timeline.plan_id); setTitle(timeline.title); setSatelliteContext(timeline.scenes.some(s => !!s.observations?.length)); setPresentation(timeline.presentation ?? 'captioned'); setMusic(timeline.music ?? false);
+      setPlanId(timeline.plan_id); setTitle(timeline.title); setSatelliteContext(timeline.scenes.some(s => !!s.observations?.length)); setPresentation(timeline.presentation ?? 'captioned'); setMusic(timeline.music ?? false); setMusicBed(timeline.music_bed ?? true);
       setAutomaticGraphs(timeline.automatic_graphs ?? false);
       setScenes(timeline.scenes.map(s => ({id: s.id, seconds: s.seconds, media_id: s.media_id, trim_start: s.trim_start, transition: s.transition, cuts: s.cuts?.map(c=>({media_id:c.media_id,seconds:c.seconds,trim_start:c.trim_start})), map_mode: s.map_mode, graphic_style:s.graphic_style,regional_focus:s.regional_focus})));
       setNarrationId(timeline.narration_id ?? ''); setNarrationVerified(timeline.narration_verified); setDirty(false);
@@ -164,7 +165,7 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
   const saved = state?.timelines.find(t => t.id === timelineId);
   const selectedPreview = state?.renders.find(r => r.id === previewId);
   const alignedCurrent=alignment?.status==='completed'&&alignment.plan_id===planId&&alignment.narration_id===narrationId&&alignment.result?.scenes.every((s,i)=>s.id===scenes[i]?.id&&Math.round(s.seconds*30)===Math.round(scenes[i].seconds*30));
-  const timelineBody = {alignment_id:alignedCurrent?alignment?.id:null,plan_id: planId, title, scenes, narration_id: narrationId || null, satellite_context: satelliteContext, presentation, automatic_graphs: automaticGraphs, music, narration_verified: narrationVerified, template};
+  const timelineBody = {alignment_id:alignedCurrent?alignment?.id:null,plan_id: planId, title, scenes, narration_id: narrationId || null, satellite_context: satelliteContext, presentation, automatic_graphs: automaticGraphs, music, music_bed: musicBed, narration_verified: narrationVerified, template};
   const checkKey = JSON.stringify(timelineBody);
   const visibleCheck = check?.key === checkKey ? check : null;
   const activeDraft = draft?.plan_id === planId ? draft : null;
@@ -367,6 +368,7 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
         <div className="production-actions"><label className="production-check"><input type="checkbox" checked={satelliteContext} onChange={e => {setSatelliteContext(e.target.checked); setDirty(true);}}/>Use real NOAA Gulf/Atlantic satellite context for scenes without imported media</label><button className="button secondary" disabled={!!busy} onClick={() => {void work('Collecting NOAA satellite observations', async () => {const result = await api<{error?: string}>('/visuals/sources/goes/refresh', {}); if (result.error) throw new Error(result.error); setNotice('NOAA observations collected. Saving a timeline preserves the latest 12 frames and their timestamps.');});}}><RefreshCw size={14}/>Collect satellite observations</button></div>
         {satelliteContext && <p className="muted">Real GeoColor observations retain the entire NOAA image and timestamps. Regional context requires a reported storm center in the Gulf/Atlantic region. Imagery has its own observation time; it does not identify the reported storm. The chronological sequence plays once per scene.</p>}
         <label className="production-check"><input type="checkbox" checked={music} disabled={!!narrationId} onChange={e => {setMusic(e.target.checked); setDirty(true);}}/>Add an original instrumental pulse, generated locally without voice or paid services</label>
+        {narrationId && presentation === 'broadcast' && <label className="production-check"><input type="checkbox" checked={musicBed} onChange={e => {setMusicBed(e.target.checked); setDirty(true);}}/>Quiet music bed under the voiceover, ducking while it speaks, with soft transition sounds</label>}
         <p className="muted">{template === 'short_30' ? '30-second short template' : template === 'report_60' ? '60-second report template' : template === 'report_90' ? '90-second report template' : 'Manual edit'} · {total.toFixed(2)} seconds</p>
         <div className="production-timebar" aria-label="Scene duration overview">{scenes.map((s, i) => <span key={s.id} style={{flex: s.seconds}} title={`Scene ${i+1}: ${s.seconds}s`}>{i+1}</span>)}</div>
         <div className="production-scene-list">{scenes.map((scene, index) => {

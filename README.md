@@ -31,7 +31,7 @@ The initial channel is **US Extreme Weather**. No paid API or existing Semantic 
 - Background 1080p H.264/AAC renders, preview/download, source/license manifests, cancellation, scene-cache retry and output quality checks.
 - Electron backend ownership, loopback-only access, readiness checks, isolated renderer, and process cleanup.
 
-No draft or rendered preview is broadcast eligible. Local TTS is excluded; OBS automation and 60-minute programs are later phases. Satellite/radar views require successful collection and explicitly show unavailable observations or source failures. The synthetic training dataset is never presented as real observations.
+No draft or rendered preview is broadcast eligible. Local TTS is excluded; OBS automation is a later phase. Timelines can run up to two hours. Satellite/radar views require successful collection and explicitly show unavailable observations or source failures. The synthetic training dataset is never presented as real observations.
 
 ## Develop
 
@@ -96,7 +96,7 @@ See [Phase 5](docs/PHASE_5.md) for local production, and [Phase 4](docs/PHASE_4.
 In **Script Editor**, use **Copy script** to record narration with your preferred tool.
 In **Video Production**, choose or prepare a scene plan, then use **Upload your voiceover**.
 Its copy button includes the exact scene narration, including any rewritten story draft.
-Upload WAV, MP3, M4A, FLAC or OGG (up to 250 MiB and one hour); the app validates
+Upload WAV, MP3, M4A, FLAC or OGG (up to 250 MiB and two hours); the app validates
 the file, measures its duration, and selects it for the timeline. Listen to the audio,
 use **Match video length to voiceover**, confirm it matches the script, then click
 **Make final video**. The app checks, saves and renders the timeline in one action.
@@ -218,13 +218,13 @@ scripts and detailed editorial/visual controls are available in collapsed panels
 The target is a coverage goal, not a guarantee: short sources are never repeated
 to fill the hour. The dashboard shows the supported word count and material gap.
 Long bulletin paragraphs split into visual beats while retaining their source
-and full narration. Timelines accept up to one hour and 600 scenes; actual audio
+and full narration. Timelines accept up to two hours and 1,500 scenes; actual audio
 must match scene timing. Long exports run locally and may take substantial time.
 
 For a **30-minute bulletin**, start with 6–8 related substantive reports and
 roughly 4,350 sourced words. Bulletin beats contain at most 18 words; map shots
 have a hard 10-second limit, including transitions. After uploading and fitting
-the voiceover, **Build mixed bulletin edit** drafts 3–4-second cuts from the full
+the voiceover, **Build mixed bulletin edit** drafts 2.5–5-second cuts from the full
 eligible library, keeps source graphs and explicit maps, and reports missing
 footage. A long bulletin with no footage cannot export. See the
 [30-minute workflow](docs/THIRTY_MINUTE_BULLETIN.md).

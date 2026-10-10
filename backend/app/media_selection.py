@@ -15,7 +15,16 @@ GROUPS = {
     'tornado': ('tornado', 'tornadoes', 'twister'),
     'hail': ('hail', 'hailstorm'),
     'preparedness': ('planning','preparations','prepare','evacuation','evacuations','shelter','sheltered','evacuated','harbor'),
+    # Concepts: what a paragraph is about beyond the weather itself.
+    'damage': ('damage', 'damaged', 'destroyed', 'debris', 'collapsed', 'wreckage', 'impact', 'impacts'),
+    'rescue': ('rescue', 'rescues', 'rescued', 'responders', 'emergency', 'crews', 'guard', 'firefighters'),
+    'cleanup': ('cleanup', 'recovery', 'aftermath', 'rebuild', 'rebuilding', 'relief', 'aid', 'volunteers'),
+    'power': ('power', 'outage', 'outages', 'electricity', 'utility', 'utilities', 'grid', 'powerlines'),
+    'traffic': ('road', 'roads', 'highway', 'highways', 'traffic', 'bridge', 'bridges', 'interstate', 'travel'),
+    'residents': ('residents', 'people', 'families', 'community', 'communities', 'neighborhood', 'neighborhoods', 'homes'),
+    'sky': ('clouds', 'cloud', 'sky', 'skies', 'overcast', 'darkened'),
 }
+CONCEPTS = {'damage', 'rescue', 'cleanup', 'power', 'traffic', 'residents', 'sky'}
 GRAPHICS = {'storm_track', 'cinematic_weather_map', 'what_changed', 'radar_animation', 'satellite_timelapse'}
 
 
@@ -28,6 +37,10 @@ def rank(scene, assets, advisory, unavailable=(), limit=5):
     wanted = topics(scene.get('source_claim_text') or scene['script_segment'])
     if scene.get('parameters',{}).get('story',{}).get('beat') in ('context','reveal'):
         wanted |= {'storm','rain','wind','waves'}
+    # A sentence without weather or concept words still belongs to its story; match that, weaker.
+    story_only = not wanted
+    if story_only:
+        wanted = topics(' '.join(str(getattr(advisory, k, '') or '') for k in ('title', 'forecast_excerpt'))) - CONCEPTS
     results = []
     for asset in assets:
         if asset['kind'] == 'audio' or asset['id'] in unavailable or not asset.get('rights_confirmed'):
@@ -45,8 +58,8 @@ def rank(scene, assets, advisory, unavailable=(), limit=5):
         start = catalog.get('preferred_trim_start', 0)
         if asset['kind'] == 'video' and start + seconds > asset['seconds'] + .01:
             continue
-        reasons = (['Reviewed capture region matches script'] if regional.targets(scene) else []) + ['Weather topics: ' + ', '.join(sorted(shared))]
-        score = len(shared) * 10 + (2 if asset['kind'] == 'video' else 0)
+        reasons = (['Reviewed capture region matches script'] if regional.targets(scene) else []) + [('Story topics: ' if story_only else 'Weather topics: ') + ', '.join(sorted(shared))]
+        score = sum(6 if topic in CONCEPTS else 10 for topic in shared) + (2 if asset['kind'] == 'video' else 0) - (6 if story_only else 0)
         event = catalog.get('event_id', '')
         if event and event.casefold() == advisory.event_key.casefold():
             score += 30

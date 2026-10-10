@@ -16,12 +16,12 @@ determines final duration. Selecting 30 minutes never pads a short script.
 5. Check coverage, render, and inspect the resulting video before accepting it.
 
 Bulletin paragraphs are divided into visual beats of at most 18 words, retaining
-the original claim, source and geographic scope. Plans support up to 600 scenes.
+the original claim, source and geographic scope. Plans support up to 1,500 scenes.
 Maps, radar and satellite shots cannot exceed 10 seconds, including transition
 handles. A short narration cannot be stretched into 30 minutes using long maps.
 
 The mixed draft aims for about 40% footage (12 minutes in a 30-minute program),
-with 3–4-second cuts, unused source ranges and at least two minutes between uses
+with 2.5–5-second cuts (beats under 2.5 seconds keep their graphic), unused source ranges and at least two minutes between uses
 of a recording. Existing manually selected assets are reserved; new suggestions
 do not reuse their ranges. Unknown-location footage is excluded from named
 regional reporting. Archival and illustrative footage remain contextual.

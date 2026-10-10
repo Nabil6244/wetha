@@ -51,3 +51,15 @@ def test_expansion_downloads_new_clips_skips_duplicates_and_retains_location_rev
         assert calls==['Florida rain'] or calls==['Florida flood']
         await manager.close()
     asyncio.run(run())
+
+
+def test_footage_searches_are_saved_and_interrupted_runs_are_reported(tmp_path):
+    import json
+    store=SimpleNamespace(path=tmp_path/'studio.db',visual_plan=lambda _:plan(),advisory=lambda _:SimpleNamespace(area=''))
+    discovery=SimpleNamespace(production=SimpleNamespace(store=store,validate_plan=lambda p,**kwargs:None))
+    (tmp_path/'footage-searches').mkdir()
+    (tmp_path/'footage-searches'/'old.json').write_text(json.dumps({'id':'old','plan_id':'plan','status':'running','searched':2,'imported':[]}))
+    manager=FootageExpansion(discovery)
+    job=manager.get('old')
+    assert job['status']=='failed' and 'closed' in job['error']
+    assert json.loads((tmp_path/'footage-searches'/'old.json').read_text())['status']=='failed'

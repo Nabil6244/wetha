@@ -14,6 +14,30 @@ def tokens(text):
     return re.findall(r"[a-z0-9]+",text.lower())
 
 
+def word_frames(plan, offsets, matched, boundaries, total):
+    """Start frame of each written word, relative to its scene. Unmatched words are interpolated."""
+    anchors=sorted(matched);result={}
+    def second(n):
+        if n in matched:return matched[n]
+        before=next((a for a in reversed(anchors) if a<n),None);after=next((a for a in anchors if a>n),None)
+        if before is None:return matched[after]
+        if after is None:return matched[before]
+        return matched[before]+(matched[after]-matched[before])*(n-before)/(after-before)
+    for i,scene in enumerate(plan['scenes']):
+        start,end=boundaries[i],boundaries[i+1];cursor=offsets[i];frames=[]
+        for word in scene['script_segment'].split():
+            count=len(tokens(word))
+            if count and cursor<total:
+                frames.append(min(end-start,max(0,round(second(cursor)*30)-start)))
+            else:
+                frames.append(frames[-1] if frames else 0)
+            cursor+=count
+        # Recognized times can jitter by a frame; captions must never move backwards.
+        for n in range(1,len(frames)):frames[n]=max(frames[n],frames[n-1])
+        result[scene['id']]=frames
+    return result
+
+
 def align(plan, words, duration):
     script=[]; offsets=[]
     for scene in plan['scenes']:
@@ -61,6 +85,7 @@ def align(plan, words, duration):
         edits.append({'id':scene['id'],'seconds':frames/30,'media_id':None,'trim_start':0,'transition':'cut','cuts':[],'map_mode':'auto','graphic_style':'auto','regional_focus':'auto'})
     if inferred:issues.append({'code':'inferred_boundaries','message':f'{len(inferred)} scene boundaries fall between matched words. Listen and review these transitions.'})
     return {'scenes':edits,'coverage':round(coverage,3),'inferred_scene_ids':inferred,'seconds':round(duration*30)/30,
+            'word_frames':word_frames(plan,offsets,matched,boundaries,len(script)),
             'issues':issues,'timing_basis':'Local recognized word timestamps matched to the saved script; unmatched boundary words interpolated and flagged.'}
 
 
@@ -86,6 +111,7 @@ class AlignmentJobs:
                  'script_text_checksum':plan['script_text_checksum'],'audio_checksum':asset['checksum'],
                  'status':'queued','progress':0,'stage':'Starting local speech model','error':None,'result':None}
             self.jobs[identity]=job
+            self._save(job)
         threading.Thread(target=self._run,args=(identity,plan,asset,path),daemon=True).start()
         return copy.deepcopy(job)
 
@@ -96,14 +122,22 @@ class AlignmentJobs:
             if identity not in self.jobs:
                 path=self.directory/f'{identity}.json'
                 if not path.is_file():raise KeyError(identity)
-                self.jobs[identity]=json.loads(path.read_text())
+                job=json.loads(path.read_text())
+                if job['status'] in ('queued','running'):
+                    # Saved while running; the speech thread did not survive an application restart.
+                    job.update(status='failed',stage='Alignment needs attention',error='Alignment stopped when the application closed. Start it again.')
+                    self._save(job)
+                self.jobs[identity]=job
             return copy.deepcopy(self.jobs[identity])
+
+    def _save(self,job):
+        (self.directory/f"{job['id']}.json").write_text(json.dumps(job))
 
     def update(self,identity,**values):
         with self.lock:
             self.jobs[identity].update(values)
-            if values.get('status') in ('completed','failed'):
-                (self.directory/f'{identity}.json').write_text(json.dumps(self.jobs[identity]))
+            if 'status' in values:
+                self._save(self.jobs[identity])
 
     def _run(self,identity,plan,asset,path):
         try:

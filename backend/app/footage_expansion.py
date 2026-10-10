@@ -1,10 +1,15 @@
 """Find and acquire new licensed video candidates from a bulletin's actual needs."""
 import asyncio
 import copy
+import json
 import re
+from pathlib import Path
 from uuid import uuid4
 from .contracts import MediaDiscoveryRequest, DiscoveryImportRequest
 from . import regional, media_selection
+
+BUDGET=500*1024*1024
+MAX_QUERIES=24
 
 
 def needs(plan,store):
@@ -30,12 +35,28 @@ def needs(plan,store):
             query=(location+' '+topic).strip()[:160]
             row=result.setdefault(query,{'query':query,'regions':regions,'scene_ids':[]})
             row['scene_ids'].append(scene['id'])
-    return list(result.values())
+    # Search the biggest gaps first: needs shared by the most beats.
+    return sorted(result.values(),key=lambda r:-len(r['scene_ids']))
 
 
 class FootageExpansion:
     def __init__(self,discovery):
         self.discovery=discovery;self.jobs={};self.tasks=set()
+        path=getattr(discovery.production.store,'path',None)
+        self.directory=Path(path).parent/'footage-searches' if path else None
+        if self.directory:
+            self.directory.mkdir(parents=True,exist_ok=True)
+            for saved in self.directory.glob('*.json'):
+                try:job=json.loads(saved.read_text())
+                except (OSError,ValueError):continue
+                if job.get('status') in ('queued','running'):
+                    # The search task did not survive an application restart.
+                    job.update(status='failed',error='Footage search stopped when the application closed. Imported clips remain in the library; run it again for the rest.')
+                    self.save(job)
+                self.jobs[job['id']]=job
+
+    def save(self,job):
+        if self.directory:(self.directory/f"{job['id']}.json").write_text(json.dumps(job))
 
     def start(self,body):
         plan=self.discovery.production.store.visual_plan(body.plan_id)
@@ -47,7 +68,7 @@ class FootageExpansion:
         queries=needs(plan,self.discovery.production.store)
         job={'id':str(uuid4()),'plan_id':body.plan_id,'status':'queued','stage':'Finding footage for the script',
              'progress':0,'queries':queries,'imported':[],'duplicates':0,'issues':[],'error':None,'searched':0,'max_new_clips':body.max_new_clips}
-        self.jobs[job['id']]=job
+        self.jobs[job['id']]=job;self.save(job)
         task=asyncio.create_task(self.run(job,plan))
         self.tasks.add(task);task.add_done_callback(self.tasks.discard)
         return copy.deepcopy(job)
@@ -64,13 +85,13 @@ class FootageExpansion:
         job['status']='running';seen=set();downloaded=0
         # Rotate queries between runs so later batches explore the full bulletin.
         queries=job['queries'];start=sum(j['searched'] for j in self.jobs.values() if j['plan_id']==plan['id'] and j['id']!=job['id'])%max(1,len(queries))
-        queries=(queries[start:]+queries[:start])[:12]
+        queries=(queries[start:]+queries[:start])[:MAX_QUERIES]
         try:
             for i,need in enumerate(queries):
                 self.discovery.production.validate_plan(plan, require_support=False)
                 job.update(stage='Searching '+need['query'],progress=i/max(1,len(queries)))
                 result=await self.discovery.search(MediaDiscoveryRequest(query=need['query'],provider='all',kind='video',plan_id=plan['id'],live=True))
-                job['searched']+=1
+                job['searched']+=1;self.save(job)
                 job['issues'].extend(result['warnings'])
                 for candidate in result['results']:
                     if len(job['imported'])>=job['max_new_clips']:break
@@ -80,14 +101,17 @@ class FootageExpansion:
                         job['duplicates']+=1;continue
                     if candidate['kind']!='video' or candidate.get('reuse_basis') not in ('cc_by','public_domain'):continue
                     if candidate.get('width') and candidate['width']<640:continue
-                    size=candidate.get('bytes',250*1024*1024)
-                    if downloaded+size>500*1024*1024:
+                    # Unknown sizes are checked after download; the per-file 250 MiB limit still applies.
+                    size=candidate.get('bytes') or 0
+                    if downloaded+size>BUDGET:
                         job['issues'].append('This batch reached its 500 MiB download budget. Run another batch for remaining needs.');continue
                     job['stage']='Adding '+candidate['title']
                     try:
                         asset=await self.discovery.import_candidate(DiscoveryImportRequest(candidate_id=candidate['id'],rights_confirmed=True))
-                        downloaded+=size
                         if asset.get('duplicate'):job['duplicates']+=1;continue
+                        downloaded+=asset.get('bytes') or size
+                        if asset.get('seconds') and asset['seconds']<5:
+                            job['issues'].append(asset['name']+': under five seconds; it gives at most one cut.')
                         job['imported'].append({'id':asset['id'],'name':asset['name'],'query':need['query'],
                             'seconds':asset['seconds'],'source':asset['source'],'license':asset['license'],
                             'needs_location_review':bool(need['regions']), 'required_regions':need['regions']})
@@ -97,5 +121,7 @@ class FootageExpansion:
             if not job['imported']:job['issues'].append('No new eligible clips found in this batch. Existing duplicates were skipped; add another source or broaden the location search.')
         except asyncio.CancelledError:
             job.update(status='failed',error='Footage search stopped when the application closed. Imported clips remain in the library.')
+            self.save(job)
             raise
         except Exception as error:job.update(status='failed',error=str(error))
+        self.save(job)

@@ -339,10 +339,17 @@ class Composer:
                 label(d,(px+25,py+20),self.records[count-1].get('issued_at','')[:16].replace('T',' ')+' UTC',24)
             for name,coord in p.get('places',[]):
                 px,py=map_point(coord,self.bounds);label(d,(px,py),name,26,'#bdd3dc')
+                if name==p.get('focus_label'):
+                    r=16+10*abs(math.sin(t*math.pi*2));d.ellipse((px-r,py-r,px+r,py+r),outline='#82efdc',width=4)
         if not self.sources and sd.scene_type != 'statistics':
             if sd.camera.geographic_target:
                 tx,ty=map_point(sd.camera.geographic_target,self.bounds)
                 u=easing(t,sd.camera.easing);x=.5+(tx/1920-.5)*u;y=.5+(ty/1080-.5)*u
+            elif p.get('focus_coord'):
+                # Move toward the focus as the zoom deepens, so push-ins and pull-outs share one path.
+                tx,ty=map_point(p['focus_coord'],self.bounds)
+                peak=max(sd.camera.start_zoom,sd.camera.end_zoom);k=(z-1)/(peak-1) if peak>1 else 0
+                x=.5+(tx/1920-.5)*k;y=.5+(ty/1080-.5)*k
             w,h=1920/z,1080/z;cx=max(w/2,min(1920-w/2,x*1920));cy=max(h/2,min(1080-h/2,y*1080))
             image=image.crop((int(cx-w/2),int(cy-h/2),int(cx+w/2),int(cy+h/2))).resize(SIZE,Image.Resampling.BILINEAR)
         d=ImageDraw.Draw(image)
@@ -355,6 +362,10 @@ class Composer:
         if p.get('graphic_style'):
             from .graphic_styles import draw as draw_graphic
             draw_graphic(image,p['graphic_style'],p['graphic_data'],t)
+            d=ImageDraw.Draw(image)
+        if p.get('visual_state'):
+            from .visual_states import draw as draw_state
+            draw_state(image,p,t)
             d=ImageDraw.Draw(image)
         if p.get('report_graphs'):
             from .report_graphs import draw as draw_report_graphs
@@ -412,17 +423,54 @@ def encoder_args(preference='software'):
     return ['-c:v','libx264','-preset','veryfast','-crf','20']
 
 
-async def render_clip(direction, parameters, output, load_asset=None, seconds=None, on_progress=None):
+TRANSITION_FRAMES = 10  # A third of a second; the shot keeps its exact duration.
+
+
+def last_frame(direction, parameters, load_asset, seconds):
+    """The outgoing shot's final picture, so the next shot can transition from it inside its own frames."""
+    composer=Composer(direction,parameters,load_asset)
+    count=max(1,round(seconds*30));span=parameters.get('camera_span')
+    return composer.frame(span[0]+(span[1]-span[0])*(count-1)/count if span else 1)
+
+
+def blend(kind, outgoing, incoming, u):
+    """Presentation transitions between two rendered pictures; neither picture's data changes."""
+    u=easing(u,'smoothstep')
+    if kind=='dissolve':
+        return Image.blend(outgoing,incoming,u)
+    if kind in ('push','story'):
+        shift=round(1920*u);image=Image.new('RGB',SIZE)
+        image.paste(outgoing,(-shift,0));image.paste(incoming,(1920-shift,0))
+        if kind=='story':
+            # A brand-colored edge marks a change of story.
+            ImageDraw.Draw(image).rectangle((1920-shift-14,0,1920-shift+14,1080),fill='#65e1d1')
+        return image
+    if kind=='wipe':
+        edge=-160+round((1920+320)*u)
+        mask=Image.linear_gradient('L').rotate(90,expand=True).resize((160,1080))
+        full=Image.new('L',SIZE,0);full.paste(255,(0,0,max(0,edge),1080));full.paste(mask.transpose(Image.Transpose.FLIP_LEFT_RIGHT),(edge,0))
+        return Image.composite(incoming,outgoing,full)
+    raise ValueError('Unknown transition.')
+
+
+async def render_clip(direction, parameters, output, load_asset=None, seconds=None, on_progress=None, previous=None):
     """Stream RGB to FFmpeg; no unbounded PNG frame cache and no network at render time."""
     composer=await asyncio.to_thread(Composer,direction,parameters,load_asset)
     seconds=seconds or composer.direction.duration
     count=round(seconds*30)
+    kind=parameters.get('transition_in')
+    outgoing=await asyncio.to_thread(last_frame,*previous) if previous and kind else None
     log=Path(output).with_suffix('.log')
     with log.open('wb') as errors:
         process=await asyncio.create_subprocess_exec('ffmpeg','-y','-hide_banner','-loglevel','warning','-f','rawvideo','-pix_fmt','rgb24','-s','1920x1080','-r','30','-i','pipe:0','-an','-frames:v',str(count),*encoder_args(os.environ.get('WETHA_VIDEO_ENCODER','software')),'-pix_fmt','yuv420p','-threads','2',str(output),stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.DEVNULL,stderr=errors)
         try:
+            span=parameters.get('camera_span')
             for i in range(count):
-                frame=await asyncio.to_thread(composer.frame,i/max(1,count-1))
+                # Shots split from one section continue its motion instead of restarting it.
+                t=span[0]+(span[1]-span[0])*i/count if span else i/max(1,count-1)
+                frame=await asyncio.to_thread(composer.frame,t)
+                if outgoing is not None and i<TRANSITION_FRAMES:
+                    frame=await asyncio.to_thread(blend,kind,outgoing,frame,(i+1)/(TRANSITION_FRAMES+1))
                 process.stdin.write(frame.tobytes());await process.stdin.drain()
                 if on_progress and ((i+1) % 30 == 0 or i+1 == count):
                     on_progress((i+1)/count)
@@ -433,6 +481,33 @@ async def render_clip(direction, parameters, output, load_asset=None, seconds=No
                 process.terminate()
                 try:await asyncio.wait_for(process.wait(),5)
                 except asyncio.TimeoutError:process.kill();await process.wait()
+
+
+def render_clip_blocking(direction, parameters, output, assets, seconds, previous=None):
+    """Process-pool form of render_clip: drawing runs outside the server process, so scenes render in parallel.
+
+    `assets` and the previous shot's assets map asset ID to bytes; workers never read the database."""
+    composer=Composer(direction,parameters,assets.__getitem__)
+    count=round(seconds*30);kind=parameters.get('transition_in')
+    outgoing=last_frame(previous[0],previous[1],previous[2].__getitem__,previous[3]) if previous and kind else None
+    span=parameters.get('camera_span')
+    with Path(output).with_suffix('.log').open('wb') as errors:
+        process=subprocess.Popen(['ffmpeg','-y','-hide_banner','-loglevel','warning','-f','rawvideo','-pix_fmt','rgb24','-s','1920x1080','-r','30','-i','pipe:0',
+                                  '-an','-frames:v',str(count),*encoder_args(os.environ.get('WETHA_VIDEO_ENCODER','software')),'-pix_fmt','yuv420p','-threads','2',str(output)],
+                                 stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=errors)
+        try:
+            for i in range(count):
+                t=span[0]+(span[1]-span[0])*i/count if span else i/max(1,count-1)
+                frame=composer.frame(t)
+                if outgoing is not None and i<TRANSITION_FRAMES:
+                    frame=blend(kind,outgoing,frame,(i+1)/(TRANSITION_FRAMES+1))
+                process.stdin.write(frame.tobytes())
+            process.stdin.close()
+            if process.wait(timeout=120):raise ValueError('Broadcast encoding failed; inspect scene log.')
+        finally:
+            if process.poll() is None:
+                process.kill();process.wait()
+    return str(output)
 
 
 def dissolve_filter(durations, overlap=.3, overlaps=None):

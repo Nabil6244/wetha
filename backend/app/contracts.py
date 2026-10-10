@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 from typing import Literal
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
-MAX_VISUAL_SCENES = 600
+MAX_VISUAL_SCENES = 1500
 
 
 class Advisory(BaseModel):
@@ -231,6 +231,8 @@ class TimelineRequest(BaseModel):
     presentation: Literal['captioned', 'cinematic', 'broadcast'] = 'captioned'
     automatic_graphs: bool = True
     music: bool = False
+    # With imported narration: a quiet original instrumental that ducks under the voice, plus soft transition sounds.
+    music_bed: bool = True
     template: Literal['short_30', 'report_60', 'report_90'] | None = None
 
 

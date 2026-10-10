@@ -41,7 +41,8 @@ def test_shorter_visual_shots_conserve_audio_frames_and_keep_claims():
     from app.automatic_edit import subdivide, shot_frames
     for frames in range(30,3601):
         lengths=shot_frames(frames)
-        assert sum(lengths)==frames and min(lengths)>=30 and max(lengths)<=120
+        assert sum(lengths)==frames and min(lengths)>=min(frames,75)
+        assert max(lengths)<=(frames if frames<150 else 120)
     plan={'id':'old','scenes':[{'id':'scene','claim_id':'claim','script_segment':'The forecast rain could cause flooding across the warned area.','parameters':{'source_advisory_id':'al'}}]}
     job={'id':'speech','result':{'scenes':[{'id':'scene','seconds':5}],'coverage':.98,'timing_basis':'Recognized speech'}}
     new,derived,edits=subdivide(plan,job)
@@ -118,3 +119,28 @@ def test_query_tags_cannot_promote_nasa_space_launch_into_weather_footage():
     scene={'script_segment':'Waves and storm surge threaten boats.','parameters':{}}
     asset={'id':'launch','name':'Science_Launching_on_SpaceX_CRS-29.mp4','kind':'video','rights_confirmed':True,'source':'https://images.nasa.gov/details/Science_Launching_on_SpaceX_CRS-29','seconds':50,'catalog':{'tags':['waves']},'context':'archival','attribution':'NASA'}
     assert rank(scene,[asset],SimpleNamespace(event_key='storm'))==[]
+
+
+def test_shots_cut_on_spoken_words_and_continue_one_camera_move():
+    from app.automatic_edit import subdivide
+    from app.alignment import align
+    text='Rain bands will spread inland tonight while coastal winds strengthen near the warned beaches and harbors.'
+    plan={'id':'old','scenes':[{'id':'scene','claim_id':'claim','script_segment':text,'parameters':{'source_advisory_id':'al'}}]}
+    # Slow first half, fast second half: proportional word splitting would misplace the cut.
+    words=[{'word':w,'start':i*.9 if i<6 else 5.4+(i-6)*.4,'end':(i*.9 if i<6 else 5.4+(i-6)*.4)+.3} for i,w in enumerate(text.split())]
+    job={'id':'speech','result':align(plan,words,9)}
+    starts=job['result']['word_frames']['scene']
+    assert len(starts)==len(text.split()) and starts==sorted(starts)
+    new,derived,edits=subdivide(plan,job)
+    assert sum(round(e['seconds']*30) for e in edits)==270
+    assert all(round(e['seconds']*30)>=75 for e in edits)
+    boundary=0
+    for shot,edit in zip(new['scenes'][:-1],edits):
+        boundary+=round(edit['seconds']*30)
+        assert boundary in starts
+        spoken=[w for w,s in zip(text.split(),starts) if s<boundary]
+        assert ' '.join(spoken).endswith(shot['script_segment'])
+    spans=[s['parameters']['camera_span'] for s in new['scenes']]
+    assert spans[0][0]==0 and spans[-1][1]==1
+    assert all(a[1]==b[0] for a,b in zip(spans,spans[1:]))
+    assert 'word_frames' not in derived['result'] and 'snapped' in derived['result']['timing_basis']

@@ -6,6 +6,7 @@ import io
 import json
 import math
 import mimetypes
+import os
 import re
 import shutil
 import subprocess
@@ -17,13 +18,41 @@ from uuid import uuid4
 from PIL import Image, ImageDraw, ImageFont
 
 from .storage import RevisionConflict, now
-from . import cinematic, broadcast, media_selection, regional
+from . import cinematic, broadcast, media_selection, regional, footage_library, audio_polish
 
 MAX_UPLOAD = 250 * 1024 * 1024
-RENDERER_VERSION = 16
+RENDERER_VERSION = 17
 MAX_MAP_SHOT_SECONDS = 10
+MAX_PROGRAM_SECONDS = 7200
 EXTENSIONS = {'image': {'.png', '.jpg', '.jpeg', '.webp'}, 'video': {'.mp4', '.mov', '.mkv', '.webm'},
               'audio': {'.wav', '.mp3', '.m4a', '.flac', '.ogg'}}
+
+
+def still_motion(frames, seed):
+    """Slow push or drift across a still image. Upscaled first so zoompan moves without stepping."""
+    n = max(1, frames - 1)
+    zoom, x, y = [
+        (f'1+0.10*on/{n}', 'iw/2-(iw/zoom/2)', 'ih/2-(ih/zoom/2)'),           # push in
+        (f'1.10-0.10*on/{n}', 'iw/2-(iw/zoom/2)', 'ih/2-(ih/zoom/2)'),        # pull out
+        ('1.08', f'(iw-iw/zoom)*on/{n}', 'ih/2-(ih/zoom/2)'),                 # drift right
+        ('1.08', f'(iw-iw/zoom)*(1-on/{n})', 'ih/2-(ih/zoom/2)'),             # drift left
+    ][seed % 4]
+    return (f"[0:v]scale=3840:2160:force_original_aspect_ratio=increase,crop=3840:2160,setsar=1,"
+            f"zoompan=z='{zoom}':x='{x}':y='{y}':d=1:s=1920x1080:fps=30,{footage_library.GRADE}[base]")
+
+
+def render_workers():
+    """Scenes rendered at once. Each uses two encoder threads; leave room for the app."""
+    try:
+        return max(1, int(os.environ['WETHA_RENDER_WORKERS']))
+    except (KeyError, ValueError):
+        return max(1, min(4, (os.cpu_count() or 2) // 2))
+
+
+def final_encoder(seconds):
+    """Long programs use the hardware encoder when present; WETHA_VIDEO_ENCODER overrides."""
+    preference = os.environ.get('WETHA_VIDEO_ENCODER') or ('auto' if seconds >= 600 else 'software')
+    return broadcast.encoder_args(preference)
 
 
 def checksum(path):
@@ -50,16 +79,21 @@ def probe(path):
 def duration(info):
     try:
         value = float(info['format']['duration'])
-        if not math.isfinite(value) or value <= 0 or value > 3600:
+        if not math.isfinite(value) or value <= 0 or value > MAX_PROGRAM_SECONDS:
             raise ValueError()
         return value
     except (KeyError, ValueError, TypeError) as error:
-        raise ValueError('Media must have a measurable duration of at most one hour.') from error
+        raise ValueError('Media must have a measurable duration of at most two hours.') from error
 
 
 def text_pages(text, width=88, lines=6):
     rows = textwrap.wrap(' '.join(text.split()), width=width) or ['']
     return ['\n'.join(rows[index:index + lines]) for index in range(0, len(rows), lines)]
+
+
+def caption_pages(text, width=42):
+    lines = textwrap.wrap(' '.join(text.split()), width) or ['']
+    return ['\n'.join(lines[i:i+2]) for i in range(0, len(lines), 2)]
 
 
 def srt_time(seconds):
@@ -82,12 +116,16 @@ class Production:
         self.tasks = {}
         self.serial = asyncio.Semaphore(1)
         self.imports = asyncio.Lock()
+        self._pool = None
 
     async def close(self):
         tasks = list(self.tasks.values())
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        if self._pool is not None:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+            self._pool = None
 
     def runtime(self):
         return {'ffmpeg': bool(shutil.which('ffmpeg')), 'ffprobe': bool(shutil.which('ffprobe')),
@@ -279,7 +317,7 @@ class Production:
             info = await asyncio.to_thread(probe, temporary)
             visual = next((s for s in info['streams'] if s['codec_type'] == 'video' and not s.get('disposition', {}).get('attached_pic')), None)
             audio = next((s for s in info['streams'] if s['codec_type'] == 'audio'), None)
-            measured = None
+            measured = None;shots = None
             if metadata.kind in ('image', 'video'):
                 if not visual or not 1 <= visual.get('width', 0) <= 8192 or not 1 <= visual.get('height', 0) <= 8192:
                     raise ValueError('A visual stream with dimensions up to 8192 pixels is required.')
@@ -295,6 +333,7 @@ class Production:
                         raise ValueError('The imported image is not a valid still image.') from error
                 else:
                     measured = duration(info)
+                    shots = await asyncio.to_thread(footage_library.detect_shots, temporary, measured)
             elif not audio or visual:
                 raise ValueError('Import an audio-only narration file.')
             else:
@@ -303,11 +342,29 @@ class Production:
                         'filename': identity + suffix, 'content_type': mimetypes.guess_type(metadata.name)[0] or 'application/octet-stream',
                         'seconds': measured, 'width': visual['width'] if visual else None,
                         'height': visual['height'] if visual else None, 'created_at': now()}
+            if shots is not None:
+                document['shot_starts'] = shots
             temporary.replace(self.root / 'media' / document['filename'])
             self.store.production_save('media', document)
             return document
         finally:
             temporary.unlink(missing_ok=True)
+
+    def analyze_shots(self):
+        """Backfill internal shot changes for library videos imported before shot analysis."""
+        analyzed, failed = 0, []
+        for asset in self.store.production_list('media'):
+            if asset['kind'] != 'video' or 'shot_starts' in asset:
+                continue
+            try:
+                shots = footage_library.detect_shots(self.media_path(asset), asset['seconds'])
+            except (ValueError, OSError):
+                shots = None
+            if shots is None:
+                failed.append(asset['name']);continue
+            self.store.production_save('media', {**asset, 'shot_starts': shots})
+            analyzed += 1
+        return {'analyzed': analyzed, 'failed': failed}
 
     def validate_plan(self, plan, require_support=True):
         script = self.describe_script(self.store.script(plan['script_id']))
@@ -545,7 +602,9 @@ class Production:
                     scene['parameters']['story']['source_label'] = script['label']
                 scene['parameters']['facts'] = advisory.facts
                 if not scene['parameters'].get('geojson'):
-                    scene['parameters']['geojson'] = next((s['parameters']['geojson'] for s in scenes if s['parameters'].get('geojson')), {'features': []})
+                    # Borrow geography only from the same story; another topic's area would mislocate this one.
+                    scene['parameters']['geojson'] = next((s['parameters']['geojson'] for s in scenes if s['parameters'].get('geojson')
+                        and s['parameters'].get('source_advisory_id', script['advisory_id']) == advisory.id), None) or self.story_geography(advisory.id)
                 scene['parameters']['credit'] = advisory.provider + ' · issued ' + advisory.issued_at.isoformat() + ' · Natural Earth'
                 scene['parameters']['fallback_label'] = 'No verified event imagery; source geography retained'
                 if scene['map_mode'] != 'auto':
@@ -572,7 +631,7 @@ class Production:
                 if scene['graphic_style'] != 'auto':
                     from .graphic_styles import prepare as prepare_graphic
                     prepare_graphic(scene,advisory)
-        plotted_claims=set()
+        plotted_claims={}
         for scene in scenes:
             scene['regional_relevance'] = regional.focus(scene, media, body.presentation)
             if body.automatic_graphs and body.presentation == 'broadcast':
@@ -581,9 +640,16 @@ class Production:
                 graph = prepare_report_graphs(scene, advisory)
                 if graph:
                     key=(graph['source_advisory_id'],tuple((c['field'],tuple(c.get('range',[]))) for c in graph['charts']))
-                    if key not in plotted_claims:
+                    # Shots split from one section share its chart; other sections do not repeat it.
+                    section = scene.get('parent_scene_id', scene['id'])
+                    if plotted_claims.setdefault(key, section) == section:
                         scene['parameters']['report_graphs'] = graph
-                        plotted_claims.add(key)
+        if body.automatic_graphs and body.presentation == 'broadcast':
+            from .visual_states import assign as assign_states
+            assign_states(scenes, lambda identity: self.store.advisory(identity or script['advisory_id']))
+        if body.presentation == 'broadcast':
+            from .visual_states import transitions
+            transitions(scenes)
         total = sum(s['frames'] for s in scenes) / 30
         targets = {'short_30':30,'report_60':60,'report_90':90}
         if body.template and total != targets[body.template]:
@@ -600,8 +666,8 @@ class Production:
                     if previous and (selected['kind']=='image' or any(start < b-.01 and end > a+.01 for a,b in previous)):
                         raise ValueError('Report templates cannot repeat images or overlap footage ranges.')
                     previous.append((start,end))
-        if total > 3600:
-            raise ValueError('A video timeline is limited to one hour. Split longer programs into separate videos.')
+        if total > MAX_PROGRAM_SECONDS:
+            raise ValueError('A video timeline is limited to two hours. Split longer programs into separate videos.')
         narration = media.get(body.narration_id) if body.narration_id else None
         if body.narration_id:
             if not narration:
@@ -625,6 +691,7 @@ class Production:
                     'source_refs': script['source_refs'], 'evidence_manifest': script['evidence_manifest'],
                     'scenes': scenes, 'seconds': total, 'narration_id': body.narration_id,
                     'presentation': body.presentation, 'music': body.music,
+                    'music_bed': bool(narration and body.music_bed and body.presentation == 'broadcast'),
                     'automatic_graphs': body.automatic_graphs, 'visual_preset': 'geographic_newsroom_v1' if body.presentation == 'broadcast' else body.presentation,
                     'bulletin_target_minutes':script.get('bulletin',{}).get('target_minutes',0),
                     'template': body.template, 'story_review_required': bool(plan.get('story_version')),
@@ -643,6 +710,13 @@ class Production:
         if persist:
             self.store.production_save('timelines', document)
         return self.describe_timeline(document)
+
+    def story_geography(self, advisory_id):
+        from .visuals import VisualEvidence
+        try:
+            return VisualEvidence(self.store).geography(advisory_id)['geojson']
+        except (KeyError, ValueError):
+            return {'type': 'FeatureCollection', 'features': []}
 
     def pin_observations(self, script):
         """Pin real regional imagery separately from the advisory's claim evidence."""
@@ -954,6 +1028,164 @@ class Production:
         broadcast.label(draw,(65,55),caption[:95],24,'#e7f1f8')
         image.save(path)
 
+    def captions(self, timeline):
+        """Caption file for the whole program, written before scenes render in parallel."""
+        rows, cursor = [], 0.0
+        for scene in timeline['scenes']:
+            if timeline.get('presentation') == 'broadcast':
+                pages = caption_pages(scene['script_segment'])
+            elif timeline.get('presentation') == 'cinematic' or not scene.get('observations'):
+                pages = text_pages(scene['script_segment'])
+            else:
+                pages = text_pages(scene['script_segment'], width=43, lines=15)
+            # Each page holds the screen in proportion to its words.
+            weights = [max(1, len(page.split())) for page in pages];elapsed = 0
+            for page, weight in zip(pages, weights):
+                start = cursor + scene['seconds'] * elapsed / sum(weights);elapsed += weight
+                end = cursor + scene['seconds'] * elapsed / sum(weights)
+                rows.append(f'{len(rows)+1}\n{srt_time(start)} --> {srt_time(end)}\n{page}\n')
+            cursor += scene['seconds']
+        return '\n'.join(rows)
+
+    def scene_assets(self, scene):
+        p = scene['parameters']
+        rows = p.get('map_observations', []) + ([p['map_legend']] if p.get('map_legend') else [])
+        return {row['id']: self.observation_path(row).read_bytes() for row in rows}
+
+    def pool(self):
+        if self._pool is None:
+            from concurrent.futures import ProcessPoolExecutor
+            self._pool = ProcessPoolExecutor(max_workers=render_workers())
+        return self._pool
+
+    async def assemble(self, job, timeline, work):
+        """List every scene for one continuous encode. Each fade becomes a short dissolve piece between
+        trimmed neighbours, so the work per fade is constant however long the program is."""
+        scenes = timeline['scenes'];broadcast_fades = timeline.get('presentation') == 'broadcast'
+        handles = [.3 if broadcast_fades and s['transition'] == 'fade' and i < len(scenes) - 1 else 0 for i, s in enumerate(scenes)]
+        files = []
+        for index, scene in enumerate(scenes):
+            segment = f'scene-{index:03}.mp4'
+            lead = handles[index-1] if index else 0
+            tail = handles[index]
+            if lead or tail:
+                body = f'body-{index:03}.mp4'
+                await self.command(job, ['-ss', f'{lead:.6f}', '-i', segment, '-frames:v', str(round((scene['seconds'] - tail) * 30)), '-an',
+                                         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '14', '-pix_fmt', 'yuv420p', body])
+                files.append(body)
+            else:
+                files.append(segment)
+            if tail:
+                piece = f'fade-{index:03}.mp4';frames = round(tail * 30)
+                start = scene['seconds'] + lead - tail
+                await self.command(job, ['-ss', f'{start:.6f}', '-i', segment, '-i', f'scene-{index+1:03}.mp4', '-filter_complex',
+                                         f'[0:v]trim=end_frame={frames},setpts=PTS-STARTPTS[a];[1:v]trim=end_frame={frames},setpts=PTS-STARTPTS[b];[a][b]xfade=transition=fade:duration={tail}:offset=0[out]',
+                                         '-map', '[out]', '-frames:v', str(frames), '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '14', '-pix_fmt', 'yuv420p', piece])
+                files.append(piece)
+        listing = work / 'concat.txt'
+        listing.write_text(''.join(f"file '{name}'\n" for name in files))
+        return listing
+
+    async def render_scene(self, job, timeline, media, work, index):
+        """Render one scene segment. Broadcast segments after a fade carry a 0.3 second lead-in handle."""
+        scenes = timeline['scenes'];scene = scenes[index]
+        handle = .3 if timeline.get('presentation') == 'broadcast' and index and scenes[index-1]['transition'] == 'fade' else 0
+        segment = work / f'scene-{index:03}.mp4'
+        clip = work / f'frames-{index:03}'
+        clip.mkdir(exist_ok=True)
+        asset = media.get(scene['media_id'])
+        is_cinematic = timeline.get('presentation') == 'cinematic'
+        is_broadcast = timeline.get('presentation') == 'broadcast'
+        pages = None if is_cinematic or is_broadcast else await asyncio.to_thread(self.overlays, timeline, scene, asset, clip)
+        if is_broadcast and scene.get('cuts'):
+            files = []
+            for cut_index, cut in enumerate(scene['cuts']):
+                cut_asset = media[cut['media_id']]
+                overlay = clip / f'cut-label-{cut_index}.png'
+                await asyncio.to_thread(self.footage_overlay, cut_asset, overlay, scene)
+                path = self.media_path(cut_asset)
+                source = ['-loop','1','-framerate','30'] if cut_asset['kind']=='image' else ['-ss',str(cut['trim_start'])]
+                piece = clip / f'cut-{cut_index}.mp4'
+                base = still_motion(round(cut['seconds']*30), index+cut_index) if cut_asset['kind']=='image' else footage_library.fill_filter(cut_asset)
+                await self.command(job,[*source,'-protocol_whitelist','file,pipe','-i',str(path),'-loop','1','-i',str(overlay),'-filter_complex',
+                    base+';[base][1:v]overlay=0:0:format=auto[out]',
+                    '-map','[out]','-an','-frames:v',str(round(cut['seconds']*30)),'-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-threads','2',str(piece)])
+                files.append(f"file '{piece.name}'\n")
+            listing = clip / 'cuts.txt'
+            listing.write_text(''.join(files))
+            await self.command(job,['-f','concat','-safe','0','-i',str(listing),'-c:v','copy','-an',str(segment)])
+        elif is_broadcast and asset:
+            seconds=scene['seconds'] + handle
+            overlay=clip/'footage-label.png'
+            await asyncio.to_thread(self.footage_overlay,asset,overlay,scene)
+            path=self.media_path(asset)
+            source=['-loop','1','-framerate','30'] if asset['kind']=='image' else ['-ss',str(scene['trim_start'])]
+            source+=['-protocol_whitelist','file,pipe','-i',str(path),'-loop','1','-i',str(overlay)]
+            base=still_motion(round(seconds*30), index) if asset['kind']=='image' else footage_library.fill_filter(asset)
+            await self.command(job,[*source,'-filter_complex',
+                base+';[base][1:v]overlay=0:0:format=auto[out]',
+                '-map','[out]','-an','-frames:v',str(round(seconds*30)),'-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-threads','2',str(segment)])
+        elif is_broadcast:
+            before = scenes[index-1] if index else None
+            previous = (before['direction'], before['parameters'], self.scene_assets(before), before['seconds']) if before and scene['parameters'].get('transition_in') else None
+            await asyncio.get_running_loop().run_in_executor(self.pool(), broadcast.render_clip_blocking, scene['direction'], scene['parameters'],
+                str(segment), self.scene_assets(scene), scene['seconds'] + handle, previous)
+        else:
+            if is_cinematic:
+                shots, count = await asyncio.to_thread(cinematic.frames, timeline, scene, clip, self.observation_path)
+                source = ['-framerate', str(len(scene['observations']) / scene['seconds']), '-i', str(clip / 'observation-%03d.png')]
+                source += ['-framerate', str(count / scene['seconds']), '-i', str(clip / 'overlay-%04d.png')]
+            elif asset:
+                path = self.media_path(asset)
+                source = ['-loop', '1', '-framerate', '30'] if asset['kind'] == 'image' else ['-ss', str(scene['trim_start'])]
+                source += ['-protocol_whitelist', 'file,pipe', '-i', str(path)]
+            elif scene.get('observations'):
+                await asyncio.to_thread(self.satellite_frames, scene, clip)
+                source = ['-framerate', str(len(scene['observations']) / scene['seconds']), '-i', str(clip / 'observation-%03d.png')]
+            else:
+                background = clip / 'background.png'
+                await asyncio.to_thread(self.background, scene, background)
+                source = ['-loop', '1', '-framerate', '30', '-i', str(background)]
+            if not is_cinematic:
+                source += ['-framerate', str(len(pages) / scene['seconds']), '-i', str(clip / 'overlay-%03d.png')]
+            filters = '[0:v:0]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=0x0b1118,setsar=1,fps=30[base];[base][1:v:0]overlay=0:0:format=auto'
+            if is_cinematic:
+                # A modest camera push changes presentation only; weather pixels remain the actual source.
+                filters = f"[0:v:0]scale=2048:1152,fps=30,crop=1920:1080:x='64+24*sin(t/10)':y='36+12*sin(t/13)',setsar=1,fps=30[base];[base][1:v:0]overlay=0:0:format=auto"
+            if scene['transition'] == 'fade':
+                filters += f",fade=t=in:st=0:d=0.25,fade=t=out:st={scene['seconds']-0.25}:d=0.25"
+            filters += '[out]'
+            await self.command(job, [*source, '-filter_complex', filters, '-map', '[out]', '-an',
+                                     '-frames:v', str(scene['frames']), '-c:v', 'libx264', '-preset', 'veryfast',
+                                     '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2', str(segment)],
+                               timeout=max(120, scene['seconds'] * 10))
+        info = await asyncio.to_thread(probe, segment)
+        if abs(duration(info) - (scene['seconds'] + handle)) > 0.1:
+            raise ValueError('A rendered scene failed duration validation.')
+
+    async def premix(self, job, timeline, media, work):
+        """Voice on top; the instrumental ducks whenever the voice speaks; soft sounds mark transitions."""
+        seconds = timeline['seconds']
+        inputs = ['-protocol_whitelist', 'file,pipe', '-i', str(self.media_path(media[timeline['narration_id']])),
+                  '-f', 'lavfi', '-i', cinematic.score_filter(seconds)]
+        cues, cursor = [], 0.0
+        for scene in timeline['scenes']:
+            if scene['parameters'].get('transition_in'):
+                cues.append(cursor)
+            cursor += scene['seconds']
+        graph = ('[0:a]aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[voice][key];'
+                 '[1:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.35,afade=t=in:d=2,afade=t=out:st=' + str(max(0, seconds - 3)) + ':d=3[bed];'
+                 '[bed][key]sidechaincompress=threshold=0.02:ratio=12:attack=15:release=450[ducked];')
+        if cues:
+            await asyncio.to_thread(audio_polish.write_cues, work / 'transitions.wav', cues, seconds)
+            inputs += ['-i', str(work / 'transitions.wav')]
+            graph += '[2:a]aformat=sample_rates=48000:channel_layouts=stereo[cues];[voice][ducked][cues]amix=inputs=3:normalize=0:duration=first'
+        else:
+            graph += '[voice][ducked]amix=inputs=2:normalize=0:duration=first'
+        graph += ',loudnorm=I=-16:TP=-1.5:LRA=11[mix]'
+        await self.command(job, [*inputs, '-filter_complex', graph, '-map', '[mix]', '-t', str(seconds), '-c:a', 'pcm_s16le', str(work / 'mix.wav')],
+                           timeout=max(600, seconds * 2), log_name='audio.log')
+
     async def _render(self, job):
         try:
             async with self.serial:
@@ -965,111 +1197,49 @@ class Production:
                 self.store.production_update_render(job)
                 work = self.root / 'renders' / job['id']
                 work.mkdir(parents=True, exist_ok=True)
-                subtitle_rows = []
-                cursor = 0.0
-                for index, scene in enumerate(timeline['scenes']):
-                    segment = work / f'scene-{index:03}.mp4'
-                    clip = work / f'frames-{index:03}'
-                    clip.mkdir(exist_ok=True)
-                    asset = media.get(scene['media_id'])
-                    is_cinematic = timeline.get('presentation') == 'cinematic'
-                    is_broadcast = timeline.get('presentation') == 'broadcast'
-                    pages = text_pages(scene['script_segment']) if is_cinematic or is_broadcast else await asyncio.to_thread(self.overlays, timeline, scene, asset, clip)
-                    for page_index, page in enumerate(pages):
-                        start = cursor + page_index * scene['seconds'] / len(pages)
-                        end = cursor + (page_index + 1) * scene['seconds'] / len(pages)
-                        subtitle_rows.append(f'{len(subtitle_rows)+1}\n{srt_time(start)} --> {srt_time(end)}\n{page}\n')
-                    cursor += scene['seconds']
-                    cached = job['cache'].get(str(index))
-                    if not (cached and segment.exists() and await asyncio.to_thread(checksum, segment) == cached):
-                        if is_broadcast and scene.get('cuts'):
-                            files = []
-                            for cut_index, cut in enumerate(scene['cuts']):
-                                cut_asset = media[cut['media_id']]
-                                overlay = clip / f'cut-label-{cut_index}.png'
-                                await asyncio.to_thread(self.footage_overlay, cut_asset, overlay, scene)
-                                path = self.media_path(cut_asset)
-                                source = ['-loop','1','-framerate','30'] if cut_asset['kind']=='image' else ['-ss',str(cut['trim_start'])]
-                                piece = clip / f'cut-{cut_index}.mp4'
-                                await self.command(job,[*source,'-protocol_whitelist','file,pipe','-i',str(path),'-loop','1','-i',str(overlay),'-filter_complex',
-                                    '[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[base];[base][1:v]overlay=0:0:format=auto[out]',
-                                    '-map','[out]','-an','-frames:v',str(round(cut['seconds']*30)),'-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-threads','2',str(piece)])
-                                files.append(f"file '{piece.name}'\n")
-                            listing = clip / 'cuts.txt'
-                            listing.write_text(''.join(files))
-                            await self.command(job,['-f','concat','-safe','0','-i',str(listing),'-c:v','copy','-an',str(segment)])
-                        elif is_broadcast and asset:
-                            seconds=scene['seconds'] + (.3 if index > 0 and timeline['scenes'][index-1]['transition']=='fade' else 0)
-                            overlay=clip/'footage-label.png'
-                            await asyncio.to_thread(self.footage_overlay,asset,overlay,scene)
-                            path=self.media_path(asset)
-                            source=['-loop','1','-framerate','30'] if asset['kind']=='image' else ['-ss',str(scene['trim_start'])]
-                            source+=['-protocol_whitelist','file,pipe','-i',str(path),'-loop','1','-i',str(overlay)]
-                            await self.command(job,[*source,'-filter_complex',
-                                '[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[base];[base][1:v]overlay=0:0:format=auto[out]',
-                                '-map','[out]','-an','-frames:v',str(round(seconds*30)),'-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-threads','2',str(segment)])
-                        elif is_broadcast:
-                            def scene_progress(fraction):
-                                job.update(progress=round((index+fraction)/len(timeline['scenes'])*75, 1),
-                                           stage=f"Scene {index+1} of {len(timeline['scenes'])} · {round(fraction*100)}%")
-                                self.store.production_update_render(job)
-                            await broadcast.render_clip(scene['direction'], scene['parameters'], segment, load_asset=lambda identity: self.map_asset(scene,identity), seconds=scene['seconds'] + (.3 if index > 0 and timeline['scenes'][index-1]['transition']=='fade' else 0), on_progress=scene_progress)
-                        else:
-                            if is_cinematic:
-                                shots, count = await asyncio.to_thread(cinematic.frames, timeline, scene, clip, self.observation_path)
-                                source = ['-framerate', str(len(scene['observations']) / scene['seconds']), '-i', str(clip / 'observation-%03d.png')]
-                                source += ['-framerate', str(count / scene['seconds']), '-i', str(clip / 'overlay-%04d.png')]
-                            elif asset:
-                                path = self.media_path(asset)
-                                source = ['-loop', '1', '-framerate', '30'] if asset['kind'] == 'image' else ['-ss', str(scene['trim_start'])]
-                                source += ['-protocol_whitelist', 'file,pipe', '-i', str(path)]
-                            elif scene.get('observations'):
-                                await asyncio.to_thread(self.satellite_frames, scene, clip)
-                                source = ['-framerate', str(len(scene['observations']) / scene['seconds']), '-i', str(clip / 'observation-%03d.png')]
-                            else:
-                                background = clip / 'background.png'
-                                await asyncio.to_thread(self.background, scene, background)
-                                source = ['-loop', '1', '-framerate', '30', '-i', str(background)]
-                            if not is_cinematic:
-                                source += ['-framerate', str(len(pages) / scene['seconds']), '-i', str(clip / 'overlay-%03d.png')]
-                            filters = '[0:v:0]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=0x0b1118,setsar=1,fps=30[base];[base][1:v:0]overlay=0:0:format=auto'
-                            if is_cinematic:
-                                # A modest camera push changes presentation only; weather pixels remain the actual source.
-                                filters = f"[0:v:0]scale=2048:1152,fps=30,crop=1920:1080:x='64+24*sin(t/10)':y='36+12*sin(t/13)',setsar=1,fps=30[base];[base][1:v:0]overlay=0:0:format=auto"
-                            if scene['transition'] == 'fade':
-                                filters += f",fade=t=in:st=0:d=0.25,fade=t=out:st={scene['seconds']-0.25}:d=0.25"
-                            filters += '[out]'
-                            await self.command(job, [*source, '-filter_complex', filters, '-map', '[out]', '-an',
-                                                     '-frames:v', str(scene['frames']), '-c:v', 'libx264', '-preset', 'veryfast',
-                                                     '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2', str(segment)],
-                                               timeout=max(120, scene['seconds'] * 10))
-                        info = await asyncio.to_thread(probe, segment)
-                        if abs(duration(info) - (scene['seconds'] + (.3 if is_broadcast and index > 0 and timeline['scenes'][index-1]['transition']=='fade' else 0))) > 0.1:
-                            raise ValueError('A rendered scene failed duration validation.')
-                        job['cache'][str(index)] = await asyncio.to_thread(checksum, segment)
-                    job.update(progress=round((index + 1) / len(timeline['scenes']) * 75), stage=f"Scene {index+1} of {len(timeline['scenes'])}")
-                    self.store.production_update_render(job)
-                (work / 'captions.srt').write_text('\n'.join(subtitle_rows), encoding='utf-8')
-                (work / 'concat.txt').write_text(''.join(f"file 'scene-{i:03}.mp4'\n" for i in range(len(timeline['scenes']))))
+                (work / 'captions.srt').write_text(self.captions(timeline), encoding='utf-8')
+                scenes = timeline['scenes'];done = [0]
+                workers = asyncio.Semaphore(render_workers())
+                async def one(index):
+                    async with workers:
+                        segment = work / f'scene-{index:03}.mp4'
+                        cached = job['cache'].get(str(index))
+                        if not (cached and segment.exists() and await asyncio.to_thread(checksum, segment) == cached):
+                            await self.render_scene(job, timeline, media, work, index)
+                            job['cache'][str(index)] = await asyncio.to_thread(checksum, segment)
+                        done[0] += 1
+                        job.update(progress=round(done[0] / len(scenes) * 75), stage=f"Rendered {done[0]} of {len(scenes)} scenes")
+                        self.store.production_update_render(job)
+                pending = [asyncio.create_task(one(i)) for i in range(len(scenes))]
+                try:
+                    await asyncio.gather(*pending)
+                except BaseException:
+                    for task in pending:task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
+                    raise
+                job.update(stage='Joining scenes', progress=78)
+                self.store.production_update_render(job)
+                listing = await self.assemble(job, timeline, work)
                 job.update(stage='Assembling video and audio', progress=80)
                 self.store.production_update_render(job)
                 audio = ['-protocol_whitelist', 'file,pipe', '-i', str(self.media_path(media[timeline['narration_id']]))] if timeline['narration_id'] else ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo']
                 if timeline.get('music'):
                     audio = ['-f', 'lavfi', '-i', cinematic.score_filter(timeline['seconds'])]
-                if timeline.get('presentation') == 'broadcast' and any(s['transition']=='fade' for s in timeline['scenes'][:-1]):
-                    handles = [.3 if s['transition']=='fade' else 0 for s in timeline['scenes'][:-1]]
-                    durations = [s['seconds'] + (handles[i-1] if i else 0) for i,s in enumerate(timeline['scenes'])]
-                    graph,mapped,_ = broadcast.dissolve_filter(durations, overlaps=handles)
-                    inputs = [part for i in range(len(durations)) for part in ['-i', f'scene-{i:03}.mp4']]
-                    await self.command(job, [*inputs,*audio,'-filter_complex',graph+';'+mapped+'format=yuv420p[out]',
-                        '-map','[out]','-map',f'{len(durations)}:a:0','-c:v','libx264','-preset','veryfast','-crf','20','-threads','2',
-                        '-af','loudnorm=I=-22:TP=-2:LRA=9,apad' if timeline.get('music') else 'loudnorm=I=-16:TP=-1.5:LRA=11,apad',
-                        '-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-t',str(timeline['seconds']),'-movflags','+faststart','program.mp4'])
-                else:
-                    await self.command(job, ['-f', 'concat', '-safe', '1', '-i', 'concat.txt', *audio,
-                                             '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-af', 'loudnorm=I=-22:TP=-2:LRA=9,afade=t=in:d=1,afade=t=out:st=' + str(max(0, timeline['seconds']-2)) + ':d=2,apad' if timeline.get('music') else 'loudnorm=I=-16:TP=-1.5:LRA=11,apad',
-                                             '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', '-t', str(timeline['seconds']),
-                                             '-movflags', '+faststart', 'program.mp4'])
+                voice_filter = 'loudnorm=I=-16:TP=-1.5:LRA=11,apad'
+                if timeline['narration_id'] and timeline.get('music_bed'):
+                    job.update(stage='Mixing voiceover, music bed and transition sounds')
+                    self.store.production_update_render(job)
+                    await self.premix(job, timeline, media, work)
+                    audio = ['-i', str(work / 'mix.wav')];voice_filter = 'apad'
+                audio_filter = ('loudnorm=I=-22:TP=-2:LRA=9,afade=t=in:d=1,afade=t=out:st=' + str(max(0, timeline['seconds']-2)) + ':d=2,apad') if timeline.get('music') else voice_filter
+                # One continuous encode: no decoder reconfiguration at cuts, and no filter graph that grows with scene count.
+                job.update(stage='Encoding the full program')
+                self.store.production_update_render(job)
+                await self.command(job, ['-f', 'concat', '-safe', '0', '-i', listing.name, *audio,
+                                         '-map', '0:v:0', '-map', '1:a:0', *final_encoder(timeline['seconds']), '-pix_fmt', 'yuv420p',
+                                         '-r', '30', '-fps_mode', 'cfr', '-af', audio_filter,
+                                         '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', '-t', str(timeline['seconds']),
+                                         '-movflags', '+faststart', 'program.mp4'], timeout=max(600, timeline['seconds'] * 3))
                 job.update(stage='Validating output', progress=90)
                 self.store.production_update_render(job)
                 output = work / 'program.mp4'
