@@ -4,6 +4,9 @@ from .contracts import Advisory
 from .weather import changes, freshness
 
 
+OPTIONAL_BROADCAST_NOTE = 'PRERECORDED REPORT. Recheck the official advisory before broadcast.'
+
+
 class ScriptWriter(Protocol):
     def generate(self, advisory: Advisory, previous: Advisory | None) -> dict: ...
 
@@ -37,8 +40,8 @@ class GroundedScriptWriter:
             "stale_feed":"STALE SOURCE CHECK. The source feed has not been successfully verified recently.",
             "not_active":"NOT IN ACTIVE FEED. The advisory is absent from the latest successfully collected active feed.",
             "conflicting":"CONFLICTING EVIDENCE. Competing versions require investigation before reporting.",
-            "current":"PRERECORDED REPORT. Recheck the official advisory before broadcast."}[label]
-        paragraphs = [warning, f"According to {'the National Hurricane Center' if advisory.provider == 'NHC' else 'the National Weather Service' if advisory.provider == 'NWS' else 'the synthetic training dataset'}, {advisory.title} was issued on {stamp}."]
+            "current":""}[label]
+        paragraphs = ([warning] if warning else []) + [f"According to {'the National Hurricane Center' if advisory.provider == 'NHC' else 'the National Weather Service' if advisory.provider == 'NWS' else 'the synthetic training dataset'}, {advisory.title} was issued on {stamp}."]
         if "wind_mph" in advisory.facts:
             f = advisory.facts
             paragraphs.append(f"The advisory reports maximum sustained winds of {f['wind_mph']} miles per hour and a minimum central pressure of {f['pressure_mb']} millibars. The reported center is at latitude {f['latitude']} and longitude {f['longitude']}.")

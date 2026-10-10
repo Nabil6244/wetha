@@ -5,8 +5,11 @@ import type {Dashboard} from '../contracts';
 import MediaCatalogEditor, {type MediaCatalog} from './MediaCatalogEditor';
 import MediaDiscovery from './MediaDiscovery';
 import LongformPlanner from './LongformPlanner';
+import BulletinBuilder from './BulletinBuilder';
 import ManualNarration, {uploadNarration} from './ManualNarration';
 
+interface FootageSearchJob {id:string;plan_id:string;status:string;stage:string;progress:number;error:string|null;duplicates:number;issues:string[];imported:{id:string;name:string;query:string;seconds:number;needs_location_review:boolean;required_regions:string[]}[]}
+interface Alignment {id:string;plan_id:string;narration_id:string;status:string;stage:string;progress:number;error:string|null;result:{scenes:SceneEdit[];coverage:number;issues:VisualIssue[]} | null}
 interface Media {
   id: string; name: string; kind: 'image' | 'video' | 'audio'; context: 'illustrative' | 'archival' | 'narration';
   license: string; attribution: string; source: string; seconds: number | null; bytes: number;
@@ -22,13 +25,14 @@ type MapMode = 'auto' | 'track' | 'warnings' | 'radar' | 'forecast';
 type GraphicStyle = 'auto' | 'change_gauge' | 'comparison_split' | 'advisory_timeline' | 'forecast_clock' | 'question_reveal' | 'source_card';
 interface SceneEdit {regional_focus?:string;graphic_style?: GraphicStyle; map_mode?: MapMode; id: string; seconds: number; media_id: string | null; trim_start: number; transition: 'cut' | 'fade'; cuts?: FootageCut[]}
 interface VisualIssue {scene_id?: string; code: string; message: string}
+interface VisualCoverage {footage_clips:number;footage_seconds:number;graph_scenes:number;observation_scenes:number;longest_graphic_seconds:number}
 interface Suggestion {media_id: string; name: string; reasons: string[]; seconds: number; trim_start: number; label: string; attribution: string}
 interface EditDraft {plan_id: string; scenes: SceneEdit[]; seconds: number; template: Template; ready?: boolean; target_seconds?: number; note: string; issues: VisualIssue[]; suggestions: {scene_id: string; protected_graphic: boolean; candidates: Suggestion[]}[]}
 interface Timeline {
   id: string; plan_id: string; title: string; script_revision: number; scenes: (Scene & SceneEdit)[];
   source_label: string; current_source_label: string; superseded: boolean; seconds: number; audio_mode: string;
   presentation?: 'captioned' | 'cinematic' | 'broadcast'; music?: boolean; narration_id: string | null; narration_verified: boolean; review_valid_now: boolean;
-  template?: Template | null;
+  automatic_graphs?: boolean; template?: Template | null;
 }
 interface Render {
   id: string; timeline_id: string; status: string; stage: string; progress: number; attempts: number; error: string | null;
@@ -37,7 +41,7 @@ interface Render {
 }
 interface State {user_report?:{available:boolean;title?:string;seconds?:number;shots?:number;visual_revision?:number};forecast_news?:{available:boolean;title?:string;seconds?:number;visual_revision?:number;visual_audit?:{shots:number;unique_graphic_treatments:number;repeated_graphic_treatments:number};status?:string;collected_at?:string;refresh_after?:string;note?:string};regional_chapter?:{available:boolean;title?:string;seconds?:number};regions:{code:string;name:string}[]; regional_coverage:{scenes:{plan_id:string;scene_id:string;regions:string[];matching_media_ids:string[];needs_footage:boolean}[];note:string};documentary?:{available:boolean;title?:string}; hour_graphics?:{available:boolean}; complete_episode?: {available: boolean; title?: string}; benchmark?: {available: boolean; event_id?: string; limitations?: string[]}; media: Media[]; timelines: Timeline[]; renders: Render[]; runtime: {ffmpeg: boolean; ffprobe: boolean; output: string; max_upload_bytes: number}}
 
-export default function Production({page, data}: {page: 'Media Library' | 'Video Production'; data: Dashboard}) {
+export default function Production({page, data, onRefresh}: {page: 'Media Library' | 'Video Production'; data: Dashboard; onRefresh?:()=>Promise<void>}) {
   const [advanced, setAdvanced] = useState(false);
   const [state, setState] = useState<State | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -62,6 +66,7 @@ export default function Production({page, data}: {page: 'Media Library' | 'Video
   const [narrationId, setNarrationId] = useState('');
   const [narrationVerified, setNarrationVerified] = useState(false);
   const [presentation, setPresentation] = useState<'captioned' | 'cinematic' | 'broadcast'>('broadcast');
+  const [automaticGraphs, setAutomaticGraphs] = useState(true);
   const [music, setMusic] = useState(false);
   const [satelliteContext, setSatelliteContext] = useState(false);
   const [timelineId, setTimelineId] = useState('');
@@ -71,19 +76,64 @@ export default function Production({page, data}: {page: 'Media Library' | 'Video
   const [template, setTemplate] = useState<Template | null>(null);
   const [requestedTemplate, setRequestedTemplate] = useState<Template>('short_30');
   const targetSeconds = requestedTemplate === 'report_90' ? 90 : requestedTemplate === 'report_60' ? 60 : 30;
-  const [check, setCheck] = useState<{key: string; ready: boolean; issues: VisualIssue[]} | null>(null);
+  const [check, setCheck] = useState<{key: string; ready: boolean; issues: VisualIssue[];visual_coverage?:VisualCoverage} | null>(null);
 
+  const [footageJob,setFootageJob]=useState<FootageSearchJob|null>(null);
+  const [footageNeeds,setFootageNeeds]=useState<{query:string;seconds:number;scene_ids:string[]}[]>([]);
+  const [footageSearch,setFootageSearch]=useState<{query:string;planId:string}|undefined>();
+  const [unsavedNarration,setUnsavedNarration]=useState(false);
+  const [autoFinish,setAutoFinish]=useState(false);
+  const [alignment,setAlignment]=useState<Alignment|null>(null);
+  const [restored,setRestored] = useState(false);
   async function load() {
     const [production, visual] = await Promise.all([api<State>('/production'), api<{plans: Plan[]}>('/visuals')]);
     setState(production); setPlans(visual.plans);
+    if (!restored && page === 'Video Production') {
+      try {
+        const saved=JSON.parse(localStorage.getItem('wetha-create-video-progress-v1') || '{}');
+        const selected=visual.plans.find(p=>p.id===saved.planId);
+        if (selected && Array.isArray(saved.scenes) && saved.scenes.map((s:SceneEdit)=>s.id).join('|')===selected.scenes.map(s=>s.id).join('|')) {
+          setPlanId(saved.planId);setScriptId(selected.script_id);setTitle(saved.title ?? 'Weather bulletin');setScenes(saved.scenes);
+          setTimelineId(saved.timelineId ?? '');setPresentation(saved.presentation ?? 'broadcast');setAutomaticGraphs(saved.automaticGraphs ?? true);
+          setSatelliteContext(saved.satelliteContext ?? false);setMusic(saved.music ?? false);setTemplate(saved.template ?? null);
+          setNarrationId(saved.narrationId ?? '');setNarrationVerified(saved.narrationVerified ?? false);setDirty(saved.dirty ?? true);
+        }
+      } catch {/* Saved backend plans remain available if browser storage is unavailable. */}
+      setRestored(true);
+    }
   }
+  useEffect(()=>{
+    if (!restored || page !== 'Video Production') return;
+    try {localStorage.setItem('wetha-create-video-progress-v1',JSON.stringify({planId,scriptId,title,scenes,timelineId,presentation,automaticGraphs,satelliteContext,music,template,narrationId,narrationVerified,dirty}));} catch {/* Backend timelines remain saved. */}
+  },[restored,page,planId,scriptId,title,scenes,timelineId,presentation,automaticGraphs,satelliteContext,music,template,narrationId,narrationVerified,dirty]);
   useEffect(() => {void load().catch(e => setError(e.message));}, []);
+  const activeRender = state?.renders.find(r=>['queued','running'].includes(r.status));
+  const latestRender = state?.renders.find(r=>r.timeline_id===timelineId);
   const rendering = state?.renders.some(r => ['queued', 'running'].includes(r.status));
   useEffect(() => {
     if (!rendering) return;
-    const timer = setInterval(() => {void load().catch(e => setError(e.message));}, 2500);
+    let loading = false;
+    const timer = setInterval(() => {
+      if (loading) return;
+      loading = true;
+      void api<{renders: Pick<Render,'id'|'status'|'stage'|'progress'|'error'|'validation'|'attempts'>[]}>('/production/progress')
+        .then(update=>setState(current=>current ? {...current,renders:current.renders.map(render=>({...render,...update.renders.find(r=>r.id===render.id)}))} : current))
+        .catch(e => setError(e.message)).finally(()=>{loading=false;});
+    }, 2500);
     return () => clearInterval(timer);
   }, [rendering]);
+  useEffect(()=>{
+    if(!alignment||!['queued','running'].includes(alignment.status))return;
+    let pending=false;let cancelled=false;
+    const timer=setInterval(()=>{if(pending)return;pending=true;void api<Alignment>(`/production/alignment/${alignment.id}`).then(job=>{if(cancelled)return;setAlignment(job);if(job.status==='failed')setError(job.error??'Speech alignment failed.');if(job.status==='completed'&&job.result){setNotice(`Speech timing ready: ${(job.result.coverage*100).toFixed(0)}% of script words matched. Apply it, then listen and review scene changes.`);}}).catch(e=>{if(!cancelled){setAlignment(null);setError(e.message);}}).finally(()=>{pending=false;});},2500);
+    return()=>{cancelled=true;clearInterval(timer);};
+  },[alignment?.id,alignment?.status]);
+  useEffect(()=>{
+    if(!footageJob||!['queued','running'].includes(footageJob.status))return;
+    let pending=false;let cancelled=false;
+    const timer=setInterval(()=>{if(pending)return;pending=true;void api<FootageSearchJob>(`/production/find-footage/${footageJob.id}`).then(job=>{if(cancelled)return;setFootageJob(job);if(job.status==='failed')setError(job.error??'Footage search failed.');if(job.status==='completed'){void load().catch(e=>setError(e.message));setNotice(`${job.imported.length} new recordings added. Review location evidence below, then rebuild the mixed edit.`);}}).catch(e=>{if(!cancelled){setFootageJob(null);setError(e.message);}}).finally(()=>{pending=false;});},2500);
+    return()=>{cancelled=true;clearInterval(timer);};
+  },[footageJob?.id,footageJob?.status]);
   async function work(label: string, action: () => Promise<void>) {
     setBusy(label); setError(''); setNotice('');
     try {await action(); await load();} catch (e) {setError(e instanceof Error ? e.message : 'Production operation failed');} finally {setBusy('');}
@@ -91,7 +141,7 @@ export default function Production({page, data}: {page: 'Media Library' | 'Video
   function choosePlan(id: string) {
     const plan = plans.find(p => p.id === id);
     setPlanId(id); setTimelineId(''); setDirty(true); setNarrationId(''); setNarrationVerified(false);
-    setDraft(null); setTemplate(null); setCheck(null); setPresentation('broadcast'); setSatelliteContext(false); setMusic(false);
+    setDraft(null); setTemplate(null); setCheck(null); setPresentation('broadcast'); setAutomaticGraphs(true); setSatelliteContext(false); setMusic(false);
     setScenes(plan?.scenes.map(s => ({id: s.id, seconds: Math.max(1, Math.min(120, s.target_seconds)), media_id: null, trim_start: 0, transition: 'cut'})) ?? []);
   }
   function chooseTimeline(id: string) {
@@ -99,7 +149,8 @@ export default function Production({page, data}: {page: 'Media Library' | 'Video
     setTimelineId(id);
     if (timeline) {
       setPlanId(timeline.plan_id); setTitle(timeline.title); setSatelliteContext(timeline.scenes.some(s => !!s.observations?.length)); setPresentation(timeline.presentation ?? 'captioned'); setMusic(timeline.music ?? false);
-      setScenes(timeline.scenes.map(s => ({id: s.id, seconds: s.seconds, media_id: s.media_id, trim_start: s.trim_start, transition: s.transition, cuts: s.cuts, map_mode: s.map_mode, graphic_style:s.graphic_style,regional_focus:s.regional_focus})));
+      setAutomaticGraphs(timeline.automatic_graphs ?? false);
+      setScenes(timeline.scenes.map(s => ({id: s.id, seconds: s.seconds, media_id: s.media_id, trim_start: s.trim_start, transition: s.transition, cuts: s.cuts?.map(c=>({media_id:c.media_id,seconds:c.seconds,trim_start:c.trim_start})), map_mode: s.map_mode, graphic_style:s.graphic_style,regional_focus:s.regional_focus})));
       setNarrationId(timeline.narration_id ?? ''); setNarrationVerified(timeline.narration_verified); setDirty(false);
       setTemplate(timeline.template ?? null); setDraft(null); setCheck(null);
     }
@@ -112,7 +163,8 @@ export default function Production({page, data}: {page: 'Media Library' | 'Video
   const narration = state?.media.find(m => m.id === narrationId);
   const saved = state?.timelines.find(t => t.id === timelineId);
   const selectedPreview = state?.renders.find(r => r.id === previewId);
-  const timelineBody = {plan_id: planId, title, scenes, narration_id: narrationId || null, satellite_context: satelliteContext, presentation, music, narration_verified: narrationVerified, template};
+  const alignedCurrent=alignment?.status==='completed'&&alignment.plan_id===planId&&alignment.narration_id===narrationId&&alignment.result?.scenes.every((s,i)=>s.id===scenes[i]?.id&&Math.round(s.seconds*30)===Math.round(scenes[i].seconds*30));
+  const timelineBody = {alignment_id:alignedCurrent?alignment?.id:null,plan_id: planId, title, scenes, narration_id: narrationId || null, satellite_context: satelliteContext, presentation, automatic_graphs: automaticGraphs, music, narration_verified: narrationVerified, template};
   const checkKey = JSON.stringify(timelineBody);
   const visibleCheck = check?.key === checkKey ? check : null;
   const activeDraft = draft?.plan_id === planId ? draft : null;
@@ -144,6 +196,14 @@ export default function Production({page, data}: {page: 'Media Library' | 'Video
       remaining -= bounded.reduce((sum, i) => sum + allocation[i], 0);
       pending = pending.filter(i => !bounded.includes(i));
     }
+    const mapTooLong = scenes.some((s,i)=>{
+      const original=plan?.scenes.find(p=>p.id===s.id);
+      const graph=automaticGraphs&&(original?.type==='what_changed'||/sustained winds|central pressure|maximum winds/i.test(original?.script_segment??''));
+      const map=presentation==='broadcast'&&!s.media_id&&!s.cuts?.length&&!graph&&(s.graphic_style??'auto')==='auto';
+      const handle=i&&scenes[i-1].transition==='fade'?9:0;
+      return map&&allocation[i]+handle>300;
+    });
+    if(mapTooLong){setError('This recording would hold a map longer than 10 seconds. Prepare a new short-beat bulletin plan or add more visual shots before fitting the audio. Your recording is unchanged.');return;}
     setScenes(old => old.map((s, i) => ({...s, seconds: allocation[i] / 30})));
     setTemplate(null); setDraft(null); setCheck(null); setDirty(true); setError('');
     setNotice('Scene durations fitted to the audio. Review where each scene changes and check footage lengths before rendering.');
@@ -151,33 +211,54 @@ export default function Production({page, data}: {page: 'Media Library' | 'Video
 
   async function makeFinalVideo() {
     await work('Checking and preparing your video', async () => {
-      const checked = await api<{ready: boolean; issues: VisualIssue[]}>('/production/check', timelineBody);
-      setCheck({...checked, key: checkKey});
-      if (!checked.ready) throw new Error(checked.issues.map(i => i.message).join(' '));
-      const timeline = !dirty && saved ? saved : await api<Timeline>('/production/timelines', timelineBody);
+      if(unsavedNarration)throw new Error('Save your pasted script using Save script & prepare automatically above.');
+      const prepared=await api<{status:string;alignment?:Alignment;plan?:Plan;body:typeof timelineBody;check:{ready:boolean;issues:VisualIssue[];visual_coverage:VisualCoverage};mixed_edit?:{coverage:{footage_clips:number;footage_seconds:number}}}>('/production/prepare',timelineBody);
+      if(prepared.status==='aligning'&&prepared.alignment){setAlignment(prepared.alignment);setAutoFinish(true);setNotice('Matching spoken timing locally. Video preparation will continue automatically when alignment finishes.');return;}
+      setAutoFinish(false);
+      if(prepared.alignment)setAlignment(prepared.alignment);
+      const checked=prepared.check;
+      if(prepared.plan){setPlans(old=>[prepared.plan!,...old.filter(p=>p.id!==prepared.plan!.id)]);setPlanId(prepared.plan.id);}
+      setScenes(prepared.body.scenes);setNarrationVerified(prepared.body.narration_verified);
+      setCheck({...checked,key:JSON.stringify(prepared.body)});
+      if(!checked.ready)throw new Error(checked.issues.map(i=>i.message).join(' '));
+      const timeline = await api<Timeline>('/production/timelines',prepared.body);
       setState(old => old ? {...old, timelines: [timeline, ...old.timelines.filter(t => t.id !== timeline.id)]} : old);
       setTimelineId(timeline.id); setDirty(false);
       const render = await api<Render>('/production/renders', {timeline_id: timeline.id});
+      setState(old=>old ? {...old,renders:[render,...old.renders.filter(r=>r.id!==render.id)]} : old);
       setPreviewId(render.id);
-      setNotice('Your video is rendering locally. When it is ready, preview it and download the MP4 below.');
+      setNotice('Source checks, speech timing, graphs and available footage were prepared automatically. Your video is rendering locally. When it is ready, preview it and download the MP4 below.');
     });
   }
+
+  useEffect(()=>{
+    if(!autoFinish||busy)return;
+    if(alignment?.status==='completed'){setAutoFinish(false);void makeFinalVideo();}
+    if(alignment?.status==='failed')setAutoFinish(false);
+  },[autoFinish,alignment?.status,busy]);
 
   return <div className="production-workspace">
     {error && <div role="alert" className="message error">{error}<button aria-label="Dismiss production error" onClick={() => setError('')}><X size={16}/></button></div>}
     {notice && <div role="status" className="message success"><FileCheck size={16}/>{notice}</div>}
     {busy && <div role="status" className="working"><LoaderCircle size={15} className="spin"/>{busy}…</div>}
-    <div className="production-banner"><Clapperboard size={21}/><div><strong>Make your weather video</strong><p>Choose a script, add your voiceover, review the visuals, then export an MP4 on this computer.</p></div><span className="pill">Local production</span></div>
+    <div className="production-banner"><Clapperboard size={21}/><div><strong>Make your weather video</strong><p>Choose stories, build flowing narration, upload your voiceover, then export—all here.</p></div><span className="pill">Local production</span></div>
     {!state ? <section className="panel detail-body">Loading production workspace…</section> : <>
     {page === 'Video Production' && <>
-      <nav className="production-steps" aria-label="Video creation steps">{['Choose script', 'Add voiceover', 'Review visuals', 'Download video'].map((label, i) => <a key={label} href={['#production-source', '#production-voiceover', '#production-finish', '#production-results'][i]}><span>{i+1}</span>{label}</a>)}</nav>
+      <nav className="production-steps" aria-label="Video creation steps">{['Stories & narration', 'Add voiceover', 'Review visuals', 'Download video'].map((label, i) => <a key={label} href={['#bulletin-stories', '#production-voiceover', '#production-finish', '#production-results'][i]}><span>{i+1}</span>{label}</a>)}</nav>
+      <BulletinBuilder data={data} disabled={!!busy || !!rendering} onBusyChange={setBusy} onDraftChange={setUnsavedNarration} onRefresh={onRefresh} onReady={(script,result)=>{
+        setPlans(old=>[result,...old.filter(p=>p.id!==result.id)]);setScriptId(script.id);setPlanId(result.id);setTitle(script.title);
+        setTimelineId('');setAlignment(null);setNarrationVerified(false);setMusic(false);setPresentation('broadcast');setAutomaticGraphs(true);setSatelliteContext(false);
+        setTemplate(null);setDraft(null);setCheck(null);setDirty(true);
+        setScenes(result.scenes.map(s=>({id:s.id,seconds:Math.max(1,Math.min(120,s.target_seconds)),media_id:null,trim_start:0,transition:'cut'})));
+      }}/>
+      <details className="production-existing"><summary>Continue an existing script or saved video</summary>
       <section id="production-source" className="panel"><div className="panel-header"><h2><Plus size={17}/>1. Choose your script</h2><span className="pill">Revision-bound</span></div><div className="detail-body">
         <div className="production-fields"><label>CHOOSE SCRIPT<select aria-label="SCRIPT FOR NEW PLAN" disabled={!!busy} value={scriptId} onChange={e => setScriptId(e.target.value)}><option value="">Choose a script</option>{data.scripts.map(s => <option key={s.id} value={s.id}>{s.title} · revision {s.revision} · {s.label}</option>)}</select></label>
         <div className="production-inline-action"><button className="button secondary" disabled={!!busy || !scriptId} onClick={() => {void work('Preparing scenes', async () => {const script = data.scripts.find(s => s.id === scriptId)!; const result = await api<Plan>('/visuals/plans', {script_id: script.id, expected_revision: script.revision}); setPlans(old => [result, ...old]); setPlanId(result.id); setTimelineId(''); setNarrationId(''); setNarrationVerified(false); setTemplate(null); setDraft(null); setCheck(null); setDirty(true); setScenes(result.scenes.map(s => ({id: s.id, seconds: Math.max(1, Math.min(120, s.target_seconds)), media_id: null, trim_start: 0, transition: 'cut'}))); setNotice('Source-linked scenes prepared. Set their timing and choose media below.');});}}><Plus size={15}/>Prepare scene plan</button></div>
         <label>CONTINUE A SCENE PLAN<select aria-label="PRODUCTION SCENE PLAN" disabled={!!busy} value={planId} onChange={e => choosePlan(e.target.value)}><option value="">Choose a visual plan</option>{plans.map(p => <option key={p.id} value={p.id}>{data.scripts.find(s => s.id === p.script_id)?.title ?? p.script_id} · revision {p.script_revision} · {p.source_label}{p.superseded_script_revision ? ' · superseded' : ''} · {p.id.slice(0, 6)}</option>)}</select></label>
         <label>CONTINUE A SAVED VIDEO<select aria-label="SAVED PRODUCTION TIMELINE" disabled={!!busy} value={timelineId} onChange={e => chooseTimeline(e.target.value)}><option value="">New timeline</option>{state.timelines.map(t => <option key={t.id} value={t.id}>{t.title} · {t.seconds.toFixed(1)}s{t.superseded ? ' · superseded' : ''} · {t.id.slice(0, 6)}</option>)}</select></label></div>
-      </div></section>
-      {plan && <div id="production-voiceover"><ManualNarration key={plan.id} text={voiceoverText}
+      </div></section></details>
+      {plan && <div id="production-voiceover"><ManualNarration key={plan.id} text={voiceoverText} compact={!!data.scripts.find(s=>s.id===plan.script_id)?.bulletin}
         label={`Scene plan · script revision ${plan.script_revision}${plan.story_version ? ' · story draft' : ''}`}
         maxBytes={state.runtime.max_upload_bytes} disabled={!!busy || plan.superseded_script_revision}
         onUpload={async audio => {
@@ -191,17 +272,34 @@ export default function Production({page, data}: {page: 'Media Library' | 'Video
           return success;
         }}/></div>}
     {plan && <section id="production-finish" className="panel"><div className="panel-header"><h2>3. Review &amp; make your video</h2><span className="pill">1080p MP4 · local export</span></div><div className="detail-body">
-      <label>VISUAL LAYOUT<select aria-label="Visual layout" value={presentation} disabled={!!busy} onChange={e => {const style=e.target.value as typeof presentation; setPresentation(style); setSatelliteContext(style==='cinematic'); if(style==='cinematic') setScenes(old=>old.map(scene=>({...scene,media_id:null,cuts:[],trim_start:0}))); setDirty(true);}}><option value="broadcast">Weather report · maps, statistics &amp; footage</option><option value="captioned">Simple report · captions &amp; footage</option><option value="cinematic">Satellite report · NOAA imagery &amp; statistics</option></select></label>
+      <p>Make final video automatically checks sources, applies spoken timing and mixes available footage with named maps and graphs. Local source matching is not human broadcast approval.</p>
+      <label>VISUAL LAYOUT<select aria-label="Visual layout" value={presentation} disabled={!!busy} onChange={e => {const style=e.target.value as typeof presentation; setPresentation(style); setSatelliteContext(style==='cinematic'); if(style==='cinematic') setScenes(old=>old.map(scene=>({...scene,media_id:null,cuts:[],trim_start:0}))); setDirty(true);}}><option value="broadcast">Approved style · named maps, graphs &amp; footage</option><option value="captioned">Simple report · captions &amp; footage</option><option value="cinematic">Satellite report · NOAA imagery &amp; statistics</option></select></label>
       <label>VIDEO TITLE<input aria-label="Video title" value={title} maxLength={150} onChange={e => {setTitle(e.target.value); setDirty(true);}}/></label>
       <p>{scenes.length} scenes · {total.toFixed(2)} seconds · {scenes.filter(s => s.media_id || s.cuts?.length).length} footage scenes · {scenes.filter(s => !s.media_id && !s.cuts?.length).length} map / graphic scenes</p>
       <label>VOICEOVER<select aria-label="Choose voiceover" value={narrationId} disabled={!!busy} onChange={e => {setNarrationId(e.target.value); setNarrationVerified(false); setMusic(false); setDirty(true);}}><option value="">No voiceover · captions only</option>{state.media.filter(m => m.kind === 'audio').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
-      {narration && <div className="production-narration"><audio controls src={`/api/production/media/${narration.id}/file`}/><p>Voiceover {narration.seconds?.toFixed(2)}s · video {total.toFixed(2)}s</p><button className="button secondary" disabled={!!busy} onClick={fitNarration}>Match video length to voiceover</button><label className="production-check"><input type="checkbox" checked={narrationVerified} onChange={e => {setNarrationVerified(e.target.checked); setDirty(true);}}/>I listened and this voiceover matches the script.</label></div>}
-      <p className="muted">Review the scene summary below. Maps and statistics use the script’s sources; missing observations may use a labeled fallback.</p>
+      {unsavedNarration&&<p role="alert" className="review-note">Your pasted final script has not been saved. Match its paragraphs to sources, enter your editor name and save it above before aligning this voiceover. The current scenes still use the previously saved script.</p>}
+      {narration && <div className="production-narration"><audio controls src={`/api/production/media/${narration.id}/file`}/><p>Voiceover {narration.seconds?.toFixed(2)}s · video {total.toFixed(2)}s</p><button className="button primary" disabled={!!busy||rendering||!!alignment&&['queued','running'].includes(alignment.status)} onClick={()=>{if(unsavedNarration){document.getElementById('polished-narration')?.scrollIntoView({behavior:'smooth',block:'start'});document.getElementById('match-final-script')?.click();setNotice('Save the pasted script above first. Its source matches will appear with the editor name field.');return;}void work('Starting local speech alignment',async()=>{setAlignment(await api<Alignment>('/production/alignment',{plan_id:planId,narration_id:narrationId}));});}}>{unsavedNarration?'Review & save pasted script first':'Align scenes to spoken words · free local tool'}</button><details><summary>Estimated timing fallback</summary><p className="muted">This fits total duration proportionally; it does not locate spoken words.</p><button className="button secondary" disabled={!!busy} onClick={fitNarration}>Match video length to voiceover</button></details>{alignment&&alignment.plan_id===planId&&alignment.narration_id===narrationId&&<div role="status"><p>{alignment.stage}{['queued','running'].includes(alignment.status) ? ` · ${(alignment.progress*100).toFixed(0)}%` : ''}</p>{alignment.status==='failed'&&<div role="alert" className="review-note"><p>{alignment.error??'Speech alignment failed.'}</p><p>Paste the exact script used to record this audio in Paste final script, save it and prepare its scenes, then align again. The estimated timing fallback changes duration only; it cannot fix different narration.</p></div>}{alignment.result&&<><p>{(alignment.result.coverage*100).toFixed(0)}% script word match</p>{alignment.result.issues.map((issue,i)=><p className="review-note" key={i}>{issue.message}</p>)}<button className="button secondary" disabled={!!busy||rendering} onClick={()=>{setScenes(alignment.result!.scenes);setDirty(true);setTemplate(null);setCheck(null);setNotice('Spoken timing applied. Build the mixed edit, then listen and review the transitions.');}}>Apply spoken timing</button></>}</div>}<label className="production-check"><input type="checkbox" checked={narrationVerified} onChange={e => {setNarrationVerified(e.target.checked); setDirty(true);}}/>I listened and this voiceover matches the script.</label></div>}
+      <p className="muted">Map shots are limited to 10 seconds, including transitions. Use distinct views, graphs and footage for longer narration. Maps and statistics use the script’s sources.</p>
       <details><summary>Review scene order and visuals</summary>{scenes.map((scene,i) => <article key={scene.id}><strong>{i+1}. {scene.seconds.toFixed(2)}s · {scene.cuts?.length ? `${scene.cuts.length} footage cuts` : scene.media_id ? state.media.find(m => m.id === scene.media_id)?.name : 'Planned map / source graphic'}</strong><p>{plan.scenes.find(s => s.id === scene.id)?.script_segment}</p></article>)}</details>
-      <div className="production-actions"><button className="button secondary" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}>{advanced ? 'Hide editing controls' : 'Edit visuals & timing'}</button><button className="button primary" disabled={!!busy || rendering || !scenes.length || plan.superseded_script_revision || (!!narrationId && !narrationVerified) || !state.runtime.ffmpeg || !state.runtime.ffprobe} onClick={() => {void makeFinalVideo();}}><Play size={16}/>Make final video</button></div>
-      {!!narrationId && !narrationVerified && <p className="muted">Listen to your uploaded audio and confirm it matches the script to enable export.</p>}
+      {data.scripts.find(s=>s.id===plan.script_id)?.bulletin&&<button className="button secondary" disabled={!!busy||rendering} onClick={()=>{void work('Building mixed bulletin edit',async()=>{
+        const result=await api<{scenes:SceneEdit[];issues:VisualIssue[];coverage:{footage_clips:number;footage_seconds:number;footage_fraction:number};footage_needs:{query:string;seconds:number;scene_ids:string[]}[]}>('/production/bulletin-edit',timelineBody);
+        setScenes(result.scenes);setFootageNeeds(result.footage_needs);setDirty(true);setTemplate(null);setCheck(null);
+        if(result.footage_needs.length&&!footageJob?.status.match(/queued|running/))setFootageJob(await api<FootageSearchJob>('/production/find-footage',{plan_id:planId}));
+        setNotice(`Mixed draft: ${result.coverage.footage_clips} clips · ${result.coverage.footage_seconds}s footage · ${Math.round(result.coverage.footage_fraction*100)}% coverage. Review before export.`);
+        if(result.issues.length)setError(Array.from(new Set(result.issues.map(i=>i.message))).join(' '));
+      });}}>Build mixed bulletin edit</button>}
+      <button className="button secondary" disabled={!!busy||!!footageJob&&['queued','running'].includes(footageJob.status)} onClick={()=>{void work('Finding new footage for this script',async()=>{setFootageJob(await api<FootageSearchJob>('/production/find-footage',{plan_id:planId}));});}}>Find &amp; add new footage for this script</button>
+      {footageJob&&footageJob.plan_id===planId&&<div aria-label="New footage search" role="status"><p>{footageJob.stage} · {(footageJob.progress*100).toFixed(0)}% · {footageJob.imported.length} added · {footageJob.duplicates} duplicates skipped</p><p className="muted">Searches new licensed archive clips from the script’s places and weather topics. Downloads stay local. A new recording needs a location reference before it can cover a named region.</p>{Array.from(new Set(footageJob.issues)).map(issue=><p key={issue} className="review-note">{issue}</p>)}{footageJob.imported.map(item=>{const media=state.media.find(m=>m.id===item.id);return <details key={item.id}><summary>{item.name} · {item.query}{item.needs_location_review?' · review capture location':''}</summary>{media&&<><video controls preload="none" style={{width:'100%',maxHeight:300}} src={`/api/production/media/${media.id}/file`}/><MediaCatalogEditor regions={state.regions} id={media.id} name={media.name} kind={media.kind} catalog={media.catalog} busy={!!busy} save={(id,catalog)=>{void work('Saving footage location evidence',async()=>{const response=await fetch(`/api/production/media/${id}/catalog`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(catalog)});if(!response.ok){const result=await response.json();throw new Error(typeof result.detail==='string'?result.detail:'Unable to save location evidence');}});}}/></>}</details>;})}</div>}
+      {!!footageNeeds.length&&<div aria-label="Footage needed for this bulletin"><h3>Footage to add</h3><p>These beats need more location-matched recordings. Search, review and import clips, then rebuild the mixed edit.</p>{footageNeeds.map(g=><div className="production-actions" key={g.query}><span>{g.query} · {g.scene_ids.length} beats · {g.seconds.toFixed(0)} seconds</span><button className="button secondary" onClick={()=>setFootageSearch({query:g.query,planId})}>Find footage: {g.query}</button></div>)}</div>}
+      <details><summary>Review available footage ({state.media.filter(m=>m.kind==='video').length} recordings)</summary><p className="muted">Preview new recordings, check their source and save capture-location evidence here. The mixed edit can use reviewed clips that match each scene.</p>{state.media.filter(m=>m.kind==='video').map(media=><details key={media.id}><summary>{media.name} · {((media.seconds??0)/60).toFixed(1)} minutes</summary><video controls preload="none" style={{width:'100%',maxHeight:320}} src={`/api/production/media/${media.id}/file`}/><p>{media.context} · {media.license}</p><a href={media.source} target="_blank" rel="noreferrer">Review original source</a><MediaCatalogEditor regions={state.regions} id={media.id} name={media.name} kind={media.kind} catalog={media.catalog} busy={!!busy} save={(id,catalog)=>{void work('Saving footage location evidence',async()=>{const response=await fetch(`/api/production/media/${id}/catalog`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(catalog)});if(!response.ok){const result=await response.json();throw new Error(typeof result.detail==='string'?result.detail:'Unable to save location evidence');}});}}/></details>)}</details>
+      <details open={!!footageSearch}><summary>Find &amp; add footage in this tab</summary><MediaDiscovery requestedSearch={footageSearch} regions={state.regions} plans={plans} scriptNames={Object.fromEntries(data.scripts.map(s=>[s.id,s.title]))} imported={load}/></details>
+      <div className="production-actions"><button className="button secondary" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}>{advanced ? 'Hide editing controls' : 'Edit visuals & timing'}</button><button className="button primary" disabled={!!busy || rendering || !scenes.length || plan.superseded_script_revision || !state.runtime.ffmpeg || !state.runtime.ffprobe} onClick={() => {void makeFinalVideo();}}>{rendering ? <LoaderCircle size={16} className="spin"/> : <Play size={16}/>} {rendering ? 'Rendering video…' : 'Make final video'}</button></div>
+      {activeRender&&<div className="production-export-status" role="status" aria-label="Export progress"><strong>{activeRender.snapshot.title} · {activeRender.status==='queued'?'Export queued':'Export in progress'}</strong><p>{activeRender.stage} · {activeRender.progress}%</p><progress max={100} value={activeRender.progress}/><p>This runs locally. The export button stays disabled until rendering finishes.</p><a className="button secondary" href="#production-results">View render progress</a></div>}
+      {!activeRender&&latestRender?.status==='succeeded'&&<div className="production-export-status" role="status"><strong>Your video is ready.</strong><a className="button primary" href={`/api/production/renders/${latestRender.id}/video?download=true`} download><Download size={15}/>Download final MP4</a></div>}
+      {!activeRender&&latestRender?.status==='failed'&&<div className="production-export-status" role="alert"><strong>Export failed</strong><p>{latestRender.error}</p><a className="button secondary" href="#production-results">View export details</a></div>}
+      {!!narrationId && !narrationVerified && <p className="muted">Make final video checks the spoken script automatically. A match below 95% needs your confirmation.</p>}
       {plan.superseded_script_revision && <p className="production-error">This script has a newer revision. Choose the latest script and prepare a new plan.</p>}
-      {visibleCheck && <div aria-label="Export checks"><p>{visibleCheck.ready ? 'Export checks passed' : 'Please fix these items before exporting'}</p>{Array.from(new Set(visibleCheck.issues.map(issue => issue.message))).map(message => <p key={message} className="production-error">{message}{visibleCheck.issues.filter(issue => issue.message === message).length > 1 ? ` (${visibleCheck.issues.filter(issue => issue.message === message).length} scenes)` : ''}</p>)}</div>}
+      {visibleCheck && <div aria-label="Export checks"><p>{visibleCheck.ready ? 'Technical export checks passed · review visual coverage' : 'Please fix these items before exporting'}</p>{visibleCheck.visual_coverage&&<p>{visibleCheck.visual_coverage.footage_clips} footage clips · {visibleCheck.visual_coverage.footage_seconds}s of footage · {visibleCheck.visual_coverage.graph_scenes} graph scenes · {visibleCheck.visual_coverage.observation_scenes} satellite/radar scenes · longest graphic {visibleCheck.visual_coverage.longest_graphic_seconds}s</p>}{Array.from(new Set(visibleCheck.issues.map(issue => issue.message))).map(message => <p key={message} className="production-error">{message}{visibleCheck.issues.filter(issue => issue.message === message).length > 1 ? ` (${visibleCheck.issues.filter(issue => issue.message === message).length} scenes)` : ''}</p>)}</div>}
     </div></section>}
 
     </>}
@@ -258,10 +356,11 @@ export default function Production({page, data}: {page: 'Media Library' | 'Video
       {plan && <section className="panel"><div className="panel-header"><h2>Story-first script &amp; storyboard</h2><span className="pill">Local drafting</span></div><div className="detail-body"><p>Open with a measured change, reveal the evidence, then explain what to watch next. Each beat keeps its source claim for review.</p><button className="button secondary" disabled={!!busy || !!plan.story_version || plan.superseded_script_revision} onClick={() => {void work('Building story draft', async () => {const result = await api<Plan>('/production/story', {plan_id: planId}); setPlans(old => [result,...old]); setPlanId(result.id); setTimelineId(''); setDraft(null); setTemplate(null); setCheck(null); setDirty(true); setPresentation('broadcast'); setMusic(true); setNarrationId(''); setNarrationVerified(false); setScenes(result.scenes.map(s => ({id:s.id,seconds:Math.max(3,Math.min(120,s.target_seconds)),media_id:null,trim_start:0,transition:'cut'}))); setNotice('Story draft prepared. Review the rewritten beats, then suggest a timed edit.');});}}>Build story draft</button>{plan.story_version && <><p className="muted">{plan.story_note}</p>{plan.scenes.map((s,i) => <article key={s.id}><strong>{i+1}. {s.story_beat ?? s.type.replaceAll('_',' ')} · {s.story_headline}</strong><p>{s.script_segment}</p><details><summary>Compare original source claim</summary><p>{s.source_claim_text}</p></details></article>)}</>}</div></section>}
       {scenes.length > 0 && <section id="production-timeline" className="panel production-timeline"><div className="panel-header"><h2><Clapperboard size={17}/>Assemble your timeline</h2><span className="pill">{total.toFixed(2)} seconds · {scenes.length} scenes</span></div><div className="detail-body">
         <label>EDIT TEMPLATE<select aria-label="EDIT TEMPLATE" value={requestedTemplate} disabled={!!busy} onChange={e => {setRequestedTemplate(e.target.value as Template); setDraft(null);}}><option value="short_30">30-second short</option><option value="report_60">60-second report</option><option value="report_90">90-second report</option></select></label><div className="production-actions"><p className="muted">The template preserves every script scene, keeps data graphics, and chooses unused matching clips from your library.</p><button className="button secondary" disabled={!!busy || !planId || !!plan?.superseded_script_revision} onClick={() => {void work('Suggesting short edit', async () => {setDraft(await api<EditDraft>('/production/assist', {plan_id: planId, template: requestedTemplate,regional_focus:Object.fromEntries(scenes.map(s=>[s.id,s.regional_focus??'auto']))})); setNotice('Draft prepared. Review suggestions and missing visuals below.');});}}>Suggest {targetSeconds}-second edit</button></div>
-        {activeDraft && <section aria-label="Suggested short edit"><p>{activeDraft.note}</p>{activeDraft.issues.map((issue, i) => <p className="production-error" key={i}>{issue.scene_id ? `${issue.scene_id}: ` : ''}{issue.message}</p>)}<div className="production-actions"><span>{activeDraft.target_seconds ?? activeDraft.seconds}s target · 3–4 second footage cuts · local instrumental</span><button className="button secondary" disabled={!!busy || activeDraft.ready === false} onClick={() => {setScenes(activeDraft.scenes); setPresentation('broadcast'); setSatelliteContext(false); setMusic(true); setNarrationId(''); setNarrationVerified(false); setTemplate(activeDraft.template); setTimelineId(''); setDirty(true); setNotice('Timed edit applied. Check visuals and timing, then save your timeline.');}}>Apply {activeDraft.target_seconds ?? activeDraft.seconds}-second draft</button></div></section>}
+        {activeDraft && <section aria-label="Suggested short edit"><p>{activeDraft.note}</p>{activeDraft.issues.map((issue, i) => <p className="production-error" key={i}>{issue.scene_id ? `${issue.scene_id}: ` : ''}{issue.message}</p>)}<div className="production-actions"><span>{activeDraft.target_seconds ?? activeDraft.seconds}s target · 3–4 second footage cuts · local instrumental</span><button className="button secondary" disabled={!!busy || activeDraft.ready === false} onClick={() => {setScenes(activeDraft.scenes); setPresentation('broadcast'); setAutomaticGraphs(true); setSatelliteContext(false); setMusic(true); setNarrationId(''); setNarrationVerified(false); setTemplate(activeDraft.template); setTimelineId(''); setDirty(true); setNotice('Timed edit applied. Check visuals and timing, then save your timeline.');}}>Apply {activeDraft.target_seconds ?? activeDraft.seconds}-second draft</button></div></section>}
         {dirty && saved && <div className="production-actions"><p className="muted">These edits have not been saved. Save a new timeline or reload the saved version before rendering.</p><button className="button secondary" onClick={() => chooseTimeline(saved.id)}>Discard timeline edits</button></div>}
         {(plan?.superseded_script_revision || saved?.superseded) && <div className="message error">This script has a newer revision. Prepare a new scene plan before rendering.</div>}
         <div className="production-fields"><label>PROGRAM TITLE<input aria-label="PROGRAM TITLE" value={title} maxLength={150} onChange={e => {setTitle(e.target.value); setDirty(true);}}/></label>
+            <label><input type="checkbox" checked={automaticGraphs} onChange={e=>{setAutomaticGraphs(e.target.checked);setDirty(true);}}/>Automatic source graphs for this video</label>
         <label>VIDEO STYLE<select aria-label="VIDEO STYLE" value={presentation} onChange={e => {const style = e.target.value as 'captioned' | 'cinematic' | 'broadcast'; setPresentation(style); if (style === 'broadcast') {setSatelliteContext(false); setScenes(old => old.map(s => ({...s, transition: 'fade'})));} if (style === 'cinematic') {setSatelliteContext(true); setScenes(old => old.map(s => ({...s, media_id: null, trim_start: 0})));} setDirty(true);}}><option value="broadcast">Broadcast · geographic scenes &amp; measured statistics</option><option value="captioned">Captioned report</option><option value="cinematic">Weather brief · full-screen imagery, stats &amp; headlines</option></select></label>
         <label>NARRATION AUDIO<select aria-label="NARRATION AUDIO" value={narrationId} onChange={e => {setNarrationId(e.target.value); if (e.target.value) setMusic(false); setNarrationVerified(false); setDirty(true);}}><option value="">Silent video with captions</option>{state.media.filter(m => m.kind === 'audio').map(m => <option key={m.id} value={m.id}>{m.name} · {m.seconds?.toFixed(2)} seconds</option>)}</select></label></div>
 
@@ -280,7 +379,7 @@ export default function Production({page, data}: {page: 'Media Library' | 'Video
             <label>MOTION GRAPHIC<select aria-label={`Scene ${index+1} motion graphic`} value={scene.graphic_style??'auto'} disabled={presentation !== 'broadcast'||!!scene.media_id||!!scene.cuts?.length} onChange={e=>editScene(index,{graphic_style:e.target.value as GraphicStyle,map_mode:e.target.value==='forecast_clock'?'forecast':'auto'})}><option value="auto">Use planned map / graphic</option><option value="change_gauge">Change dial</option><option value="comparison_split">Before / after split</option><option value="advisory_timeline">Advisory timeline</option><option value="forecast_clock">Forecast time ladder</option><option value="question_reveal">Question / answer reveal</option><option value="source_card">Source spotlight</option></select></label>
             <label>CLIP START<input aria-label={`Scene ${index+1} clip start`} type="number" min={0} step={0.1} value={scene.trim_start} disabled={!scene.media_id || state.media.find(m => m.id === scene.media_id)?.kind !== 'video'} onChange={e => editScene(index, {trim_start: Number(e.target.value)})}/></label>
             <label>TRANSITION<select aria-label={`Scene ${index+1} transition`} value={scene.transition} onChange={e => editScene(index, {transition: e.target.value as 'cut' | 'fade'})}><option value="cut">Cut</option><option value="fade">{presentation === 'broadcast' ? 'Dissolve' : 'Fade through black'}</option></select></label>
-          </div>{!!scene.cuts?.length && <div><p className="muted">Footage sequence · {scene.cuts.length} cuts</p>{scene.cuts.map((cut, i) => <p className="muted" key={i}>{state.media.find(m => m.id === cut.media_id)?.name ?? cut.media_id} · {cut.trim_start.toFixed(2)}s start · {cut.seconds.toFixed(2)}s duration</p>)}<button className="button secondary" disabled={!!busy} onClick={() => editScene(index, {cuts: [], media_id: null, trim_start: 0})}>Clear footage sequence for scene {index+1}</button></div>}{activeDraft?.suggestions.find(s => s.scene_id === scene.id)?.candidates.map(candidate => <div className="production-actions" key={candidate.media_id}><p><strong>{candidate.name}</strong> · {candidate.label}<br/><span className="muted">{candidate.reasons.join(' · ')} · Credit: {candidate.attribution}</span></p><button className="button secondary" disabled={!!busy} onClick={() => {setPresentation('broadcast'); setSatelliteContext(false); editScene(index, {media_id: candidate.media_id, seconds: candidate.seconds, trim_start: candidate.trim_start, transition: 'cut'});}}>Use suggestion for scene {index+1}</button></div>)}</article>;
+          </div>{!!scene.cuts?.length && <div><p className="muted">Footage sequence · {scene.cuts.length} cuts</p>{scene.cuts.map((cut, i) => <p className="muted" key={i}>{state.media.find(m => m.id === cut.media_id)?.name ?? cut.media_id} · {cut.trim_start.toFixed(2)}s start · {cut.seconds.toFixed(2)}s duration</p>)}<button className="button secondary" disabled={!!busy} onClick={() => editScene(index, {cuts: [], media_id: null, trim_start: 0})}>Clear footage sequence for scene {index+1}</button></div>}{activeDraft?.suggestions.find(s => s.scene_id === scene.id)?.candidates.map(candidate => <div className="production-actions" key={candidate.media_id}><p><strong>{candidate.name}</strong> · {candidate.label}<br/><span className="muted">{candidate.reasons.join(' · ')} · Credit: {candidate.attribution}</span></p><button className="button secondary" disabled={!!busy} onClick={() => {setPresentation('broadcast'); setAutomaticGraphs(true); setSatelliteContext(false); editScene(index, {media_id: candidate.media_id, seconds: candidate.seconds, trim_start: candidate.trim_start, transition: 'cut'});}}>Use suggestion for scene {index+1}</button></div>)}</article>;
         })}</div>
         <button className="button secondary" disabled={!!busy || !planId} onClick={() => {void work('Checking visuals and timing', async () => {const result = await api<{ready: boolean; issues: VisualIssue[]}>('/production/check', timelineBody); setCheck({...result, key: checkKey}); setNotice(result.ready ? 'Timeline checks passed. Review any graphic fallbacks below.' : 'Timeline needs fixes before it can be saved.');});}}>Check visuals &amp; timing</button>
         {visibleCheck && <div role="region" aria-label="Timeline checks"><p>{visibleCheck.ready ? 'Ready to render after saving' : 'Fix these issues before rendering'}</p>{visibleCheck.issues.map((issue, i) => <p className="production-error" key={i}>{issue.scene_id ? `${issue.scene_id}: ` : ''}{issue.message}</p>)}</div>}

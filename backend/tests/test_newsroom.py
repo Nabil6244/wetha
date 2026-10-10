@@ -334,3 +334,36 @@ def test_multiple_topics_validate_every_id_before_creating_run(client):
         response = client.post('/api/newsroom/runs',json={'advisory_id':'training:cyclone:2','advisory_ids':ids})
         assert response.status_code == status
     assert len(client.get('/api/dashboard').json()['newsroom']['runs']) == before
+
+
+def test_current_narration_omits_prerecorded_sentence_and_blank_note_saves(client):
+    document=draft(client,current(client))
+    sentence='PRERECORDED REPORT. Recheck the official advisory before broadcast.'
+    assert sentence not in document['text']
+    assert document['text'].startswith('According to')
+    for note in ('', '   ', None):
+        body={'expected_revision':document['revision'],'text':document['text']+'\n\nAn editorial draft note for testing.', 'editor':'Test editor'}
+        if note is not None:body['note']=note
+        response=client.post(f"/api/scripts/{document['id']}/revisions",json=body)
+        assert response.status_code==200,response.text
+        document=response.json()
+        assert next(v for v in document['versions'] if v['revision']==document['revision'])['note']=='Narration edited'
+
+
+def test_legacy_prerecorded_sentence_can_be_removed_without_context_block(client):
+    import copy
+    from uuid import uuid4
+    from app.editorial import claim_id
+    from app.newsroom import OPTIONAL_BROADCAST_NOTE
+    document=draft(client,current(client))
+    legacy=copy.deepcopy(document);legacy['id']=str(uuid4())
+    legacy['text']=OPTIONAL_BROADCAST_NOTE+'\n\n'+document['text']
+    opening=copy.deepcopy(legacy['grounded_scenes'][0]);opening['script_segment']=OPTIONAL_BROADCAST_NOTE
+    legacy['grounded_scenes'].insert(0,opening)
+    legacy['claims'].insert(0,{'id':claim_id(OPTIONAL_BROADCAST_NOTE),'text':OPTIONAL_BROADCAST_NOTE,'status':'generated_grounded','source_advisory_ids':[document['advisory_id']],'support':None})
+    client.app.state.store.save_script(legacy)
+    response=client.post(f"/api/scripts/{legacy['id']}/revisions",json={'expected_revision':1,'text':document['text'],'editor':'Test editor','note':''})
+    assert response.status_code==200,response.text
+    updated=response.json()
+    assert not any(i['code']=='missing_context' for i in updated['editorial']['issues'])
+    assert all(c['status']!='requires_verification' for c in updated['claims'])

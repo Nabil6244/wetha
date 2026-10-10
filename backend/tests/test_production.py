@@ -27,6 +27,67 @@ def prepare(client):
     return script, plan, body
 
 
+def test_progress_poll_does_not_rebuild_weather_or_timelines(tmp_path, monkeypatch):
+    with TestClient(create_app(tmp_path)) as client:
+        _, _, body = prepare(client)
+        timeline = client.post('/api/production/timelines', json=body).json()
+        job = client.post('/api/production/renders', json={'timeline_id':timeline['id']}).json()
+        def expensive_state():
+            raise AssertionError('Progress polling must not rebuild production state')
+        monkeypatch.setattr(client.app.state.production, 'state', expensive_state)
+        response = client.get('/api/production/progress')
+        assert response.status_code == 200
+        row = next(r for r in response.json()['renders'] if r['id'] == job['id'])
+        assert 'progress' in row and 'stage' in row
+        assert 'snapshot' not in row and 'timeline_state' not in row
+
+
+def test_visual_coverage_exposes_empty_library_selection_and_long_holds(tmp_path):
+    with TestClient(create_app(tmp_path)) as client:
+        _,_,body=prepare(client)
+        body['presentation']='broadcast'
+        body['scenes'][0]['seconds']=30
+        result=client.post('/api/production/check',json=body).json()
+        assert not result['ready']
+        assert result['visual_coverage']['footage_clips']==0
+        assert result['visual_coverage']['observation_scenes']==0
+        assert result['visual_coverage']['longest_graphic_seconds']==30
+        assert {'no_footage','no_observations','long_visual_hold'} <= {i['code'] for i in result['issues']}
+
+
+def test_map_shot_limit_is_enforced_at_check_save_and_render(tmp_path):
+    with TestClient(create_app(tmp_path)) as client:
+        _,_,body=prepare(client)
+        body['presentation']='broadcast'
+        body['scenes'][0]['seconds']=10
+        response=client.post('/api/production/timelines',json=body)
+        assert response.status_code==200,response.text
+        timeline=response.json()
+        body['scenes'][0]['seconds']=10+1/30
+        checked=client.post('/api/production/check',json=body).json()
+        assert not checked['ready']
+        assert 'map_hold_limit' in {i['code'] for i in checked['issues']}
+        assert client.post('/api/production/timelines',json=body).status_code==422
+        # Legacy saved timelines cannot bypass the new rule at render time.
+        timeline['scenes'][0]['seconds']=30
+        with client.app.state.store.connection() as conn:
+            conn.execute('UPDATE production_timelines SET document=? WHERE id=?',(json.dumps(timeline),timeline['id']))
+        response=client.post('/api/production/renders',json={'timeline_id':timeline['id']})
+        assert response.status_code==422 and 'Maximum is 10 seconds' in response.text
+
+
+def test_map_shot_limit_includes_dissolve_handle_and_keeps_chart_duration():
+    from app.production import Production
+    def scene(identity, seconds, **changes):
+        return {'id':identity,'seconds':seconds,'transition':'cut','parameters':{},'direction':{'scene_type':'storm_track'},**changes}
+    timeline={'presentation':'broadcast','scenes':[scene('one',5,transition='fade'),scene('two',10)]}
+    assert Production.map_hold_issues(timeline)[0]['scene_id']=='two'
+    timeline['scenes'][1]['seconds']=9.7
+    assert Production.map_hold_issues(timeline)==[]
+    timeline['scenes'][1].update(seconds=25,parameters={'report_graphs':{'charts':[]}})
+    assert Production.map_hold_issues(timeline)==[]
+
+
 def image():
     buffer = io.BytesIO()
     Image.new('RGB', (160, 90), '#1e554e').save(buffer, format='PNG')

@@ -231,9 +231,12 @@ def statistics(draw, changes, t):
 def director(scene, event_id, seconds, facts=None, source=None):
     """Local semantic director. Forecast paragraphs become geographic source layers."""
     p=scene.get('parameters',{}); typ=scene['type']
-    kind='statistics' if typ=='what_changed' else 'storm_track' if p.get('geojson',{}).get('features') else 'region_focus'
-    title=scene.get('story_headline') or ('WHAT CHANGED?' if kind=='statistics' else 'REPORTED STORM TRACK' if kind=='storm_track' else 'SOURCE REGION')
-    fallback = None if kind!='region_focus' else 'No event-linked observation asset; reported geography only.'
+    features=p.get('geojson',{}).get('features',[])
+    has_track=any(f.get('properties',{}).get('kind')=='reported_center' for f in features)
+    has_warning=any(f.get('properties',{}).get('kind')=='alert_area' for f in features)
+    kind='statistics' if typ=='what_changed' else 'storm_track' if has_track else 'region_focus'
+    title=scene.get('story_headline') or ('WHAT CHANGED?' if kind=='statistics' else 'REPORTED STORM TRACK' if kind=='storm_track' else 'SOURCE WARNING AREA' if has_warning else 'SOURCE REGION')
+    fallback = None if kind!='region_focus' or has_warning else 'No event-linked observation asset; reported geography only.'
     if kind=='statistics' and not p.get('changes'):
         fallback='No previous source measurement; current values only.'
     return SceneDirection(scene_type=kind,event_id=event_id,duration=seconds,headline=title,
@@ -343,7 +346,7 @@ class Composer:
             w,h=1920/z,1080/z;cx=max(w/2,min(1920-w/2,x*1920));cy=max(h/2,min(1080-h/2,y*1080))
             image=image.crop((int(cx-w/2),int(cy-h/2),int(cx+w/2),int(cy+h/2))).resize(SIZE,Image.Resampling.BILINEAR)
         d=ImageDraw.Draw(image)
-        if sd.scene_type=='statistics':
+        if sd.scene_type=='statistics' and not p.get('report_graphs'):
             d.rectangle((0,0,1920,1080),fill='#081d2c')
             changes=p.get('changes',[])
             if not changes:
@@ -353,14 +356,24 @@ class Composer:
             from .graphic_styles import draw as draw_graphic
             draw_graphic(image,p['graphic_style'],p['graphic_data'],t)
             d=ImageDraw.Draw(image)
+        if p.get('report_graphs'):
+            from .report_graphs import draw as draw_report_graphs
+            draw_report_graphs(image,p['report_graphs'],t)
+            d=ImageDraw.Draw(image)
         d.rectangle((0,0,1920,82),fill='#061724')
         label(d,(52,27),'WEATHER INTELLIGENCE',25)
-        label(d,(1370,29),sd.event_id+'  /  ARCHIVE' if all(s.historical for s in sd.sources) and sd.sources else sd.event_id+'  /  SOURCE RECORD',23,'#65e1d1')
+        label(d,(1370,29),('ARCHIVED WARNING' if all(s.historical for s in sd.sources) else 'SOURCE WARNING') if sd.event_id.startswith('urn:') else sd.event_id[:28]+' / SOURCE RECORD',23,'#65e1d1')
+        if p.get('location_label') and not p.get('report_graphs'):
+            label(d,(55,890),p['location_label'][:95],26,'#82efdc')
         # A narrow lower third leaves imagery dominant; full prose remains in the SRT.
         d.rectangle((0,970,1920,1080),fill='#061724')
         label(d,(55,988),sd.headline,34)
         source=p.get('credit','NOAA / NHC · Natural Earth cartography')
         label(d,(55,1040),source[:140],21,'#a8c4d0')
+        if self.sources and p.get('map_observations') and sd.scene_type=='satellite_timelapse':
+            stamp=p['map_observations'][i]['observed_at']
+            d.rectangle((1170,95,1880,164),fill='#061724')
+            label(d,(1190,115),'OBSERVED '+datetime.fromisoformat(stamp).strftime('%d %b %Y / %H:%M UTC'),26,'#65e1d1')
         if sd.fallback:
             d.rounded_rectangle((55,123,1025,215),radius=10,fill='#0c2431')
             label(d,(80,143),'LABELED FALLBACK',23,'#ffc887')
@@ -399,7 +412,7 @@ def encoder_args(preference='software'):
     return ['-c:v','libx264','-preset','veryfast','-crf','20']
 
 
-async def render_clip(direction, parameters, output, load_asset=None, seconds=None):
+async def render_clip(direction, parameters, output, load_asset=None, seconds=None, on_progress=None):
     """Stream RGB to FFmpeg; no unbounded PNG frame cache and no network at render time."""
     composer=await asyncio.to_thread(Composer,direction,parameters,load_asset)
     seconds=seconds or composer.direction.duration
@@ -411,6 +424,8 @@ async def render_clip(direction, parameters, output, load_asset=None, seconds=No
             for i in range(count):
                 frame=await asyncio.to_thread(composer.frame,i/max(1,count-1))
                 process.stdin.write(frame.tobytes());await process.stdin.drain()
+                if on_progress and ((i+1) % 30 == 0 or i+1 == count):
+                    on_progress((i+1)/count)
             process.stdin.close();await asyncio.wait_for(process.wait(),120)
             if process.returncode:raise ValueError('Broadcast encoding failed; inspect scene log.')
         finally:

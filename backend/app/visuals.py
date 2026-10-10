@@ -18,6 +18,7 @@ import httpx
 from .intelligence import IntelligenceDesk
 from .storage import now, RevisionConflict
 from . import broadcast
+from .contracts import MAX_VISUAL_SCENES
 
 GOES_PAGE='https://www.star.nesdis.noaa.gov/GOES/sector_band.php?sat=G19&sector=ga&band=GEOCOLOR&length=12'
 GOES_BASE='https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/ga/GEOCOLOR/'
@@ -332,7 +333,21 @@ class VisualEvidence:
     def plan(self,script,style):
         geographies={}
         assets=self.state()['assets'];scenes=[];asset_ids=set()
-        for index,claim in enumerate(script['claims']):
+        claims = []
+        for claim in script['claims']:
+            words = claim['text'].split()
+            if script.get('bulletin') and len(words) > 18:
+                # Balanced, short visual beats leave room for a slower recorded
+                # delivery while keeping maps below the ten-second ceiling.
+                count=math.ceil(len(words)/18)
+                width=math.ceil(len(words)/count)
+                claims.extend({**claim, 'text':' '.join(words[i:i+width]),'source_claim_text':claim['text']} for i in range(0,len(words),width))
+            else:
+                claims.append(claim)
+        if len(claims) > MAX_VISUAL_SCENES:
+            raise ValueError(f'This bulletin needs more than {MAX_VISUAL_SCENES} visual beats. Split it into separate programs before preparing video.')
+        for index,claim in enumerate(claims):
+            scope_text=claim.get('source_claim_text') or claim['text']
             source_id=claim.get('primary_advisory_id', claim['source_advisory_ids'][0] if claim['source_advisory_ids'] else script['advisory_id'])
             if source_id not in geographies:geographies[source_id]=self.geography(source_id)
             geography=geographies[source_id]
@@ -340,8 +355,8 @@ class VisualEvidence:
             source_advisory=self.store.advisory(source_id)
             kind='lower_third';parameters={};fallback='Source attribution card with advisory issue time'
             if index==0:kind='news_intro'
-            elif 'Compared with' in claim['text']:kind='what_changed';parameters={'changes':geography['advisory']['changes'],'comparison':geography['advisory']['comparison']}
-            elif 'reported_center' in kinds and ('latitude' in claim['text'] or 'location' in claim['text'].lower()):
+            elif 'Compared with' in scope_text:kind='what_changed';parameters={'changes':geography['advisory']['changes'],'comparison':geography['advisory']['comparison']}
+            elif 'reported_center' in kinds and ('latitude' in scope_text or 'location' in scope_text.lower()):
                 kind='storm_track';parameters={'geojson':geography['geojson'],'timeline':geography['timeline']}
             elif 'alert_area' in kinds and index==1:kind='cinematic_weather_map';parameters={'geojson':geography['geojson']}
             if style in ('satellite','radar') and index==1:
@@ -359,10 +374,12 @@ class VisualEvidence:
                     asset_ids.update(parameters['asset_ids'])
                 else:parameters={'unavailable_requested_layer':style,'reason':'No cached observations close to this script issue time; retain source card fallback.'}
             from .location_labels import apply as apply_places
-            apply_places(parameters,source_advisory,claim['text'])
+            apply_places(parameters,source_advisory,scope_text)
             parameters.update(source_advisory_id=source_id)
             parameters.setdefault('geojson', geography['geojson'])
             scenes.append({'id':f'scene-{index+1}','type':kind,'regional_targets':named_regions(claim['text']),'script_segment':claim['text'],'claim_id':claim['id'],'target_seconds':round(len(claim['text'].split())/145*60,1),'asset_type':kind,'visual_instructions':'Preserve source, timestamps, uncertainty and evidence label; restrained camera movement.','parameters':parameters,'source_refs':[self.store.advisory(identity).source_url for identity in claim['source_advisory_ids']],'advisory_timestamp':source_advisory.issued_at.isoformat(),'camera_movement':'ease_to_region' if kind in ('storm_track','cinematic_weather_map') else 'slow_push' if kind=='satellite_timelapse' else 'none','transition':'dissolve','fallback_asset':fallback,'voiceover_alignment':None,'timing_basis':'145 words/minute estimate; audio not generated'})
+            if claim.get('source_claim_text'):
+                scenes[-1]['source_claim_text']=claim['source_claim_text']
         for scene in scenes:
             advisory = self.store.advisory(scene['parameters']['source_advisory_id'])
             source = broadcast.VisualSource(source_url=advisory.source_url, checksum=advisory.checksum, event_id=advisory.event_key,

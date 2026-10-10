@@ -16,6 +16,11 @@ from .storage import Store, RevisionConflict
 from .weather import parse_nhc, nhc_url, fetch_official
 from .pipeline import Newsroom
 from .editorial import evaluate, edited, attest, legacy_document
+from . import polished
+from .alignment import AlignmentJobs
+from .footage_expansion import FootageExpansion
+from .contracts import FootageExpansionRequest
+from .contracts import PolishedRequest, SourceMapRequest, AlignmentRequest
 from .models import model_status
 from .fixtures import training_advisories
 from .collector import Collector
@@ -40,14 +45,18 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         app.state.collector = collector
         app.state.newsroom = Newsroom(store, collector, model_transport)
         app.state.visuals = VisualEvidence(store, visual_transport)
-        app.state.production = Production(store, describe_script)
+        app.state.production = Production(store, describe_script, describe_scripts)
+        app.state.alignment = AlignmentJobs(app.state.production)
+        app.state.production.alignment_jobs = app.state.alignment
         app.state.discovery = MediaDiscovery(app.state.production, discovery_transport)
+        app.state.footage_expansion = FootageExpansion(app.state.discovery)
         collector.start()
         logger.info(json.dumps({"event":"backend_ready", "database":str(store.path)}))
         try:
             yield
         finally:
             await app.state.production.close()
+            await app.state.footage_expansion.close()
             await app.state.discovery.close()
             await app.state.visuals.close()
             await collector.close()
@@ -91,12 +100,19 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         reviews = store.reviews(document['id'])
         review = next((row for row in reviews if row['revision'] == document['revision']), None)
         result = evaluate(document, intelligence, evidence, review)
+        if document.get('polished_narration'):
+            from .preview_audit import audit
+            result['preview_audit'] = audit(document, evidence)
         result['is_latest'] = document['revision'] == store.script(document['id']).get('revision', 1)
         if not result['is_latest']:
             result['editorial']['can_review'] = False
         result['versions'] = store.versions(document['id'])
         result['reviews'] = reviews
         return result
+
+    def describe_scripts(identities):
+        intelligence = desk()
+        return {identity:describe_script(store.script(identity), intelligence) for identity in identities}
 
     @app.get("/api/health")
     def health():
@@ -221,6 +237,39 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
     def script_evidence(document):
         return [store.advisory(identity) for identity in document.get('source_advisory_ids', [document['advisory_id']])]
 
+    @app.get('/api/scripts/{identity}/source-pack')
+    def copy_source_pack(identity: str):
+        document = store.script(identity)
+        return polished.source_pack(document, script_evidence(document))
+
+    @app.post('/api/scripts/{identity}/source-map')
+    def suggest_source_map(identity: str, body: SourceMapRequest):
+        document = store.script(identity)
+        selected = document.get('selected_advisory_ids', [document['advisory_id']])
+        return polished.suggest(body.text, [a for a in script_evidence(document) if a.id in selected])
+
+    @app.post('/api/scripts/{identity}/polished')
+    def save_polished(identity: str, body: PolishedRequest):
+        def build(document):
+            return polished.save(document, body, script_evidence(document))
+        return describe_script(store.revise(identity, body.expected_revision, body.editor, body.note, build))
+
+    @app.post('/api/production/alignment')
+    def start_alignment(body: AlignmentRequest):
+        return app.state.alignment.start(body.plan_id, body.narration_id)
+
+    @app.get('/api/production/alignment/{identity}')
+    def alignment_status(identity: str):
+        return app.state.alignment.get(identity)
+
+    @app.post('/api/production/find-footage')
+    async def find_new_footage(body: FootageExpansionRequest):
+        return app.state.footage_expansion.start(body)
+
+    @app.get('/api/production/find-footage/{identity}')
+    def footage_search_status(identity: str):
+        return app.state.footage_expansion.get(identity)
+
     @app.post('/api/scripts/{identity}/revisions')
     def revise_script(identity: str, body: EditRequest):
         def build(document):
@@ -270,7 +319,12 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
     @app.get('/api/visuals')
     def visual_state():
         result = app.state.visuals.state()
-        result['plans'] = [evaluate_plan(plan) for plan in result['plans']]
+        scripts = describe_scripts({p['script_id'] for p in result['plans']}) if result['plans'] else {}
+        for plan in result['plans']:
+            script = scripts[plan['script_id']]
+            plan['current_source_label'] = script['label']
+            plan['superseded_script_revision'] = script['revision'] != plan['script_revision']
+            plan['review_valid_now'] = script['review_valid'] and not plan['superseded_script_revision']
         return result
 
     @app.get('/api/visuals/scene-schema')
@@ -331,6 +385,12 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
     @app.get('/api/production')
     def production_state():
         return app.state.production.state()
+
+    @app.get('/api/production/progress')
+    def production_progress():
+        # Polling an encoder must not repeatedly rebuild weather intelligence or plans.
+        keys = ('id', 'status', 'stage', 'progress', 'error', 'validation', 'attempts')
+        return {'renders':[{k:r.get(k) for k in keys} for r in store.production_list('renders')]}
 
     @app.get('/api/production/benchmark/{kind}')
     def historical_benchmark(kind: str):
@@ -430,6 +490,65 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
     @app.post('/api/production/check')
     def check_production(body: TimelineRequest):
         return app.state.production.check_timeline(body)
+
+    @app.post('/api/production/prepare')
+    def prepare_production(body: TimelineRequest):
+        """One local preparation step; source audit and alignment are revision bound."""
+        import copy
+        from .bulletin_edit import draft
+        production=app.state.production
+        plan=store.visual_plan(body.plan_id)
+        production.validate_plan(plan)
+        payload=body.model_dump()
+        if body.narration_id:
+            jobs=list(app.state.alignment.jobs.values())
+            for path in app.state.alignment.directory.glob('*.json'):
+                try:jobs.append(app.state.alignment.get(path.stem))
+                except (ValueError,KeyError):continue
+            audio=store.production_get('media',body.narration_id)
+            matching=[j for j in jobs if j['status']=='completed' and j['plan_id']==body.plan_id and j['narration_id']==body.narration_id and j['script_text_checksum']==plan['script_text_checksum'] and j['audio_checksum']==audio['checksum']]
+            if not matching:
+                return {'status':'aligning','alignment':app.state.alignment.start(body.plan_id,body.narration_id)}
+            job=matching[-1]
+            if job['result']['coverage']<.95 and not body.narration_verified:
+                raise ValueError('Audio match is below 95%. Listen and confirm the recording, or upload the matching voiceover.')
+            timed={s['id']:s for s in job['result']['scenes']}
+            payload['scenes']=[{**s,'seconds':timed[s['id']]['seconds']} for s in payload['scenes']]
+            payload.update(alignment_id=job['id'],narration_verified=True,music=False,template=None)
+        if body.narration_id and payload['presentation']=='broadcast' and not plan.get('automatic_shots') and not any(s.get('media_id') or s.get('cuts') for s in payload['scenes']):
+            from .automatic_edit import subdivide
+            plan,derived,edits=subdivide(plan,job)
+            if len(edits)>600:raise ValueError('This narration needs more than 600 visual shots. Split the program into chapters.')
+            store.save_visual_plan(plan)
+            with app.state.alignment.lock:
+                app.state.alignment.jobs[derived['id']]=derived
+                (app.state.alignment.directory/(derived['id']+'.json')).write_text(json.dumps(derived))
+            payload.update(plan_id=plan['id'],alignment_id=derived['id'],scenes=edits)
+        prepared=TimelineRequest(**payload)
+        timeline=production.create_timeline(prepared,persist=False)
+        media=store.production_list('media');unavailable=[]
+        for asset in media:
+            if asset['kind']=='audio':continue
+            try:production.media_path(asset)
+            except (ValueError,OSError):unavailable.append(asset['id'])
+        mixed=draft(timeline,media,store.advisory,unavailable) if prepared.presentation=='broadcast' else None
+        if mixed:payload['scenes']=mixed['scenes']
+        check=production.check_timeline(TimelineRequest(**payload))
+        return {'status':'ready' if check['ready'] else 'needs_attention','body':payload,'check':check,'mixed_edit':mixed,'plan':evaluate_plan(plan),'alignment':app.state.alignment.get(payload['alignment_id']) if payload.get('alignment_id') else None,
+                'note':'Prepared automatically for local preview. Human broadcast approval is unchanged.'}
+
+    @app.post('/api/production/bulletin-edit')
+    def mixed_bulletin_edit(body: TimelineRequest):
+        from .bulletin_edit import draft
+        production=app.state.production
+        timeline=production.create_timeline(body,persist=False)
+        media=store.production_list('media')
+        unavailable=[]
+        for asset in media:
+            if asset['kind']=='audio':continue
+            try:production.media_path(asset)
+            except (ValueError,OSError):unavailable.append(asset['id'])
+        return draft(timeline,media,store.advisory,unavailable)
 
     @app.get('/api/production/discovery')
     async def reviewed_media_discovery():

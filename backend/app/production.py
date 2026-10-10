@@ -20,7 +20,8 @@ from .storage import RevisionConflict, now
 from . import cinematic, broadcast, media_selection, regional
 
 MAX_UPLOAD = 250 * 1024 * 1024
-RENDERER_VERSION = 12
+RENDERER_VERSION = 16
+MAX_MAP_SHOT_SECONDS = 10
 EXTENSIONS = {'image': {'.png', '.jpg', '.jpeg', '.webp'}, 'video': {'.mp4', '.mov', '.mkv', '.webm'},
               'audio': {'.wav', '.mp3', '.m4a', '.flac', '.ogg'}}
 
@@ -70,9 +71,10 @@ def srt_time(seconds):
 
 
 class Production:
-    def __init__(self, store, describe_script):
+    def __init__(self, store, describe_script, describe_scripts=None):
         self.store = store
         self.describe_script = describe_script
+        self.describe_scripts = describe_scripts
         self.root = store.path.parent / 'production'
         (self.root / 'media').mkdir(parents=True, exist_ok=True)
         (self.root / 'renders').mkdir(exist_ok=True)
@@ -93,9 +95,12 @@ class Production:
                 'max_upload_bytes': MAX_UPLOAD}
 
     def state(self):
+        timelines = self.store.production_list('timelines')
+        scripts = self.describe_scripts({t['script_id'] for t in timelines}) if self.describe_scripts and timelines else {}
+        described = {t['id']:self.describe_timeline(t, scripts.get(t['script_id'])) for t in timelines}
         return {'runtime': self.runtime(), 'media': self.store.production_list('media'),
-                'timelines': [self.describe_timeline(t) for t in self.store.production_list('timelines')],
-                'renders': [self.describe_render(r) for r in self.store.production_list('renders')],
+                'timelines': list(described.values()),
+                'renders': [{**r, 'timeline_state':described[r['timeline_id']]} for r in self.store.production_list('renders')],
                 'benchmark': self.benchmark_info(), 'complete_episode': self.episode_info(),
                 'hour_graphics': self.hour_graphics_info(), 'documentary': self.documentary_info(),
                 'regional_chapter': self.regional_chapter_info(),
@@ -304,12 +309,15 @@ class Production:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def validate_plan(self, plan):
+    def validate_plan(self, plan, require_support=True):
         script = self.describe_script(self.store.script(plan['script_id']))
         if script['revision'] != plan['script_revision'] or hashlib.sha256(script['text'].encode()).hexdigest() != plan['script_text_checksum']:
             raise RevisionConflict('The script changed. Create a new visual plan and timeline from the latest revision.')
-        if not script.get('claims') or any(c['status'] == 'requires_verification' for c in script['claims']):
-            raise ValueError('Resolve unsupported script claims before rendering a production preview.')
+        if require_support and (not script.get('claims') or any(c['status'] == 'requires_verification' for c in script['claims'])):
+            audit = script.get('preview_audit', {})
+            if not audit.get('ready'):
+                details = [f"Paragraph {i+1}: unsupported values {', '.join(row['unsupported_numbers']+row['conflicts'])}" for i,row in enumerate(audit.get('claims', [])) if row['status']=='needs_attention']
+                raise ValueError('Automatic source check needs attention. ' + ' '.join(details) if details else 'Resolve unsupported script claims before rendering a production preview.')
         if any(issue['code'] == 'missing_context' for issue in script['editorial']['issues']):
             raise ValueError('Restore the original source-context opening before rendering.')
         if any(self.store.advisory(row['id']).checksum != row['checksum'] for row in plan['evidence_manifest']):
@@ -385,8 +393,49 @@ class Production:
                 if scene['parameters'].get('unavailable_requested_layer'):
                     issues.append({'scene_id': scene['id'], 'code': 'missing_observation', 'message': scene['parameters'].get('reason', 'Observation layer unavailable.')})
         issues += [{'scene_id':s['id'], 'code':'missing_regional_weather', 'message':s['parameters'].get('fallback_label','Local weather layer unavailable.')} for s in timeline['scenes'] if s.get('regional_relevance',{}).get('status')=='missing_regional_weather']
-        return {'ready': True, 'seconds': timeline['seconds'], 'issues': issues,
-                'note': 'Source graphic fallbacks are renderable. Imported footage retains contextual labels.'}
+        coverage = self.visual_coverage(timeline)
+        if body.presentation == 'broadcast':
+            if not coverage['footage_clips']:
+                issues.append({'code':'no_footage', 'message':'No footage selected. This export will contain maps and graphics only.'})
+            if not coverage['observation_scenes']:
+                issues.append({'code':'no_observations', 'message':'No satellite or radar observations selected. Geographic maps alone do not show observed weather.'})
+            if coverage['longest_graphic_seconds'] > 12:
+                issues.append({'code':'long_visual_hold', 'message':f"The longest map/graphic holds for {coverage['longest_graphic_seconds']:g} seconds. Add visual changes and footage before treating this as a finished edit."})
+        map_issues = self.map_hold_issues(timeline)
+        issues += map_issues
+        missing_long_footage = timeline.get('bulletin_target_minutes',0)>=30 and timeline['seconds']>=600 and not coverage['footage_clips']
+        return {'ready': not bool(map_issues) and not missing_long_footage, 'seconds': timeline['seconds'], 'issues': issues,
+                'visual_coverage':coverage,
+                'note': 'Technical render checks only. Review the visual mix separately.'}
+
+    @staticmethod
+    def map_hold_issues(timeline):
+        issues = []
+        for index, scene in enumerate(timeline['scenes']):
+            if scene.get('media_id') or scene.get('cuts'):
+                continue
+            direction = scene.get('direction',{})
+            kind = direction.get('scene_type',scene.get('type'))
+            if kind not in ('storm_track','cinematic_weather_map','region_focus','satellite_wide','satellite_timelapse','radar_animation'):
+                continue
+            # A chart over cartography is a statistical shot, not a map hold.
+            if scene['parameters'].get('report_graphs') or scene.get('graphic_style','auto')!='auto':
+                continue
+            handle = .3 if timeline.get('presentation')=='broadcast' and index and timeline['scenes'][index-1].get('transition')=='fade' else 0
+            if round((scene['seconds']+handle)*30) > MAX_MAP_SHOT_SECONDS*30:
+                issues.append({'scene_id':scene['id'],'code':'map_hold_limit',
+                    'message':f"Map shot {index+1} lasts {scene['seconds']+handle:g} seconds. Maximum is 10 seconds, including transitions. Split it into distinct shots or add footage; preserve the narration duration."})
+        return issues
+
+    @staticmethod
+    def visual_coverage(timeline):
+        scenes = timeline['scenes']
+        footage = [s for s in scenes if s.get('media_id') or s.get('cuts')]
+        return {'footage_clips':sum(len(s.get('cuts',[])) or 1 for s in footage),
+                'footage_seconds':round(sum(s['seconds'] for s in footage),1),
+                'graph_scenes':sum(bool(s['parameters'].get('report_graphs')) or s.get('direction',{}).get('scene_type')=='statistics' for s in scenes),
+                'observation_scenes':sum(bool(s.get('direction',{}).get('asset_ids')) for s in scenes),
+                'longest_graphic_seconds':round(max((s['seconds'] for s in scenes if not s.get('media_id') and not s.get('cuts')),default=0),1)}
 
     def create_timeline(self, body, persist=True):
         plan = self.store.visual_plan(body.plan_id)
@@ -444,10 +493,37 @@ class Production:
                     raise ValueError('Still images do not have a trim point.')
             elif requested.trim_start:
                 raise ValueError('Source cards do not have a trim point.')
-            scenes.append({**original, **requested.model_dump(), 'seconds': seconds, 'frames': frames,
+            scenes.append({**copy.deepcopy(original), **requested.model_dump(), 'seconds': seconds, 'frames': frames,
                            'cuts': cuts,
                            'selection_catalog': asset.get('catalog', {}) if asset else {},
                            'observations': observations if not asset else []})
+        audit = script.get('preview_audit')
+        if audit and audit['ready']:
+            from .visuals import VisualEvidence
+            visual = VisualEvidence(self.store)
+            support = {r['claim_id']:r for r in audit['claims']}
+            geography = {}
+            for scene in scenes:
+                row = support.get(scene.get('claim_id'))
+                if not row or not row['primary_advisory_id']:continue
+                identity = row['primary_advisory_id']
+                if identity not in geography:geography[identity] = visual.geography(identity)
+                p = scene['parameters']
+                if p.get('source_advisory_id') != identity:
+                    # Remove layers tied to the previous story rather than reattribute them.
+                    for key in ('asset_ids','map_observations','report_graphs','location_labels','regional_weather'):
+                        p.pop(key,None)
+                    if scene['type'] in ('satellite_timelapse','satellite_wide','radar_animation'):
+                        scene['type']='cinematic_weather_map'
+                all_features=[]
+                for source_id in row['source_advisory_ids']:
+                    if source_id not in geography:geography[source_id]=visual.geography(source_id)
+                    all_features.extend(geography[source_id]['geojson']['features'])
+                p.update(source_advisory_id=identity,geojson={'type':'FeatureCollection','features':all_features})
+                scene['source_refs']=row['source_advisory_ids']
+                scene['source_advisory_ids']=row['source_advisory_ids']
+                scene['source_audit']=row
+                scene['advisory_timestamp']=self.store.advisory(identity).issued_at.isoformat()
         from .location_labels import apply as apply_places
         for scene in scenes:
             apply_places(scene['parameters'], self.store.advisory(scene['parameters'].get('source_advisory_id',script['advisory_id'])),scene['script_segment'])
@@ -475,11 +551,39 @@ class Production:
                 if scene['map_mode'] != 'auto':
                     from .map_scenes import prepare
                     scene['direction'] = prepare(self, scene, advisory, source)
+                elif scene['type']=='satellite_timelapse' and scene['parameters'].get('asset_ids') and not scene['media_id'] and not scene['cuts']:
+                    pinned = self.pin_observations({'advisory_id':advisory.id, 'source_issued_at':advisory.issued_at.isoformat()})
+                    wanted = set(scene['parameters']['asset_ids'])
+                    selected = [a for a in pinned if a['id'] in wanted]
+                    if len(selected) < 2:
+                        raise ValueError('The planned satellite sequence is unavailable. Collect matching observations and prepare a new plan.')
+                    scene['parameters']['map_observations'] = selected
+                    observation_sources = [broadcast.VisualSource(**{**source.model_dump(),
+                        'data_type':'satellite_observation','source_url':a['source_url'],'checksum':a['checksum'],
+                        'observation_start':datetime.fromisoformat(a['observed_at']),
+                        'observation_end':datetime.fromisoformat(a['observed_at']),
+                        'projection':'native_viewport','coverage':'Gulf/Atlantic regional context; event attribution unverified',
+                        'attribution':'NOAA / NESDIS / STAR','license':a['license'],'catalogue_url':a['source_url']}) for a in selected]
+                    scene['direction'] = broadcast.SceneDirection(scene_type='satellite_timelapse',event_id=advisory.event_key,
+                        duration=scene['seconds'],headline='SATELLITE OBSERVATIONS',layers=['satellite'],
+                        asset_ids=[a['id'] for a in selected],sources=observation_sources,
+                        camera=broadcast.Camera(movement='smooth_zoom_in',end_zoom=1.06)).model_dump(mode='json')
+                    scene['parameters']['credit']='NOAA / NESDIS / STAR · Regional observation context · independent observation times'
                 if scene['graphic_style'] != 'auto':
                     from .graphic_styles import prepare as prepare_graphic
                     prepare_graphic(scene,advisory)
+        plotted_claims=set()
         for scene in scenes:
             scene['regional_relevance'] = regional.focus(scene, media, body.presentation)
+            if body.automatic_graphs and body.presentation == 'broadcast':
+                from .report_graphs import prepare as prepare_report_graphs
+                advisory = self.store.advisory(scene['parameters'].get('source_advisory_id', script['advisory_id']))
+                graph = prepare_report_graphs(scene, advisory)
+                if graph:
+                    key=(graph['source_advisory_id'],tuple((c['field'],tuple(c.get('range',[]))) for c in graph['charts']))
+                    if key not in plotted_claims:
+                        scene['parameters']['report_graphs'] = graph
+                        plotted_claims.add(key)
         total = sum(s['frames'] for s in scenes) / 30
         targets = {'short_30':30,'report_60':60,'report_90':90}
         if body.template and total != targets[body.template]:
@@ -496,8 +600,8 @@ class Production:
                     if previous and (selected['kind']=='image' or any(start < b-.01 and end > a+.01 for a,b in previous)):
                         raise ValueError('Report templates cannot repeat images or overlap footage ranges.')
                     previous.append((start,end))
-        if total > 600:
-            raise ValueError('Phase 5 previews are limited to ten minutes per timeline.')
+        if total > 3600:
+            raise ValueError('A video timeline is limited to one hour. Split longer programs into separate videos.')
         narration = media.get(body.narration_id) if body.narration_id else None
         if body.narration_id:
             if not narration:
@@ -507,19 +611,35 @@ class Production:
             self.media_path(narration)
             if abs(total - narration['seconds']) > 0.2:
                 raise ValueError('Scene timing must match measured narration duration within 0.2 seconds.')
+        aligned = None
+        if body.alignment_id:
+            job = self.alignment_jobs.get(body.alignment_id)
+            if job['status'] != 'completed' or job['plan_id'] != plan['id'] or job['narration_id'] != body.narration_id or job['script_text_checksum'] != plan['script_text_checksum'] or not narration or job['audio_checksum'] != narration['checksum']:
+                raise ValueError('Speech alignment belongs to a different script or audio. Align the current recording again.')
+            aligned = job['result']
+            if [(s['id'], round(s['seconds']*30)) for s in scenes] != [(s['id'], round(s['seconds']*30)) for s in aligned['scenes']]:
+                raise ValueError('Scene durations changed after speech alignment. Realign or use manual timing.')
         document = {'id': str(uuid4()), 'plan_id': plan['id'], 'script_id': script['id'],
                     'script_revision': script['revision'], 'script_text_checksum': plan['script_text_checksum'],
                     'title': body.title.strip(), 'source_label': script['label'], 'source_issued_at': script['source_issued_at'],
                     'source_refs': script['source_refs'], 'evidence_manifest': script['evidence_manifest'],
                     'scenes': scenes, 'seconds': total, 'narration_id': body.narration_id,
                     'presentation': body.presentation, 'music': body.music,
+                    'automatic_graphs': body.automatic_graphs, 'visual_preset': 'geographic_newsroom_v1' if body.presentation == 'broadcast' else body.presentation,
+                    'bulletin_target_minutes':script.get('bulletin',{}).get('target_minutes',0),
                     'template': body.template, 'story_review_required': bool(plan.get('story_version')),
                     'story_version': plan.get('story_version'),
                     'reported_facts': self.store.advisory(script['advisory_id']).facts,
                     'report_title': self.store.advisory(script['advisory_id']).title,
                     'narration_verified': body.narration_verified, 'audio_mode': 'imported_narration' if narration else 'local_instrumental' if body.music else 'silent',
-                    'timing_basis': 'Manual scene timing; matched to imported audio' if narration else 'Manual scene timing',
+                    'alignment_id':body.alignment_id, 'alignment_coverage':aligned['coverage'] if aligned else None,
+                    'timing_basis': aligned['timing_basis'] if aligned else 'Manual scene timing; matched to imported audio' if narration else 'Manual scene timing',
+                    'preview_audit':script.get('preview_audit'),
                     'broadcast_eligible': False, 'created_at': now()}
+        if persist:
+            map_issues = self.map_hold_issues(document)
+            if map_issues:
+                raise ValueError(' '.join(issue['message'] for issue in map_issues))
         if persist:
             self.store.production_save('timelines', document)
         return self.describe_timeline(document)
@@ -578,9 +698,9 @@ class Production:
                 draw.multiline_text((45, 850), 'NOAA / NESDIS / STAR · GOES-19 GeoColor\nGulf / Atlantic regional context\nNighttime colors use infrared enhancement.\nObservation and advisory times are independent.', font=ImageFont.load_default(size=20), fill='#b7c9d5', spacing=10)
                 image.save(directory / f'observation-{index:03}.png')
 
-    def describe_timeline(self, document):
+    def describe_timeline(self, document, script=None):
         result = dict(document)
-        script = self.describe_script(self.store.script(document['script_id']))
+        script = script or self.describe_script(self.store.script(document['script_id']))
         result['superseded'] = script['revision'] != document['script_revision']
         result['current_source_label'] = script['label']
         result['review_valid_now'] = script['review_valid'] and not result['superseded']
@@ -590,6 +710,11 @@ class Production:
         return {**document, 'timeline_state': self.describe_timeline(self.store.production_get('timelines', document['timeline_id']))}
 
     def validate_timeline(self, timeline):
+        map_issues = self.map_hold_issues(timeline)
+        if map_issues:
+            raise ValueError(' '.join(issue['message'] for issue in map_issues))
+        if timeline.get('bulletin_target_minutes',0)>=30 and timeline['seconds']>=600 and not self.visual_coverage(timeline)['footage_clips']:
+            raise ValueError('This long bulletin has no footage. Build and review the mixed bulletin edit before exporting.')
         script = self.validate_plan(self.store.visual_plan(timeline['plan_id']))
         # Source status is re-evaluated on each attempt; the job snapshot stores the actual label used.
         media = {}
@@ -633,10 +758,37 @@ class Production:
                    'error': None, 'attempts': 1, 'snapshot': timeline, 'media': media, 'cache': {},
                    'broadcast_eligible': False, 'created_at': now(), 'validation': None, 'renderer_version': RENDERER_VERSION}
             self.store.production_save('renders', job)
+        if not retry_id:
+            self.reuse_scene_cache(job)
+            self.store.production_update_render(job)
         task = asyncio.create_task(self._render(job))
         self.tasks[job['id']] = task
         task.add_done_callback(lambda done: self.tasks.pop(job['id'], None))
         return self.describe_render(job)
+
+    def reuse_scene_cache(self, job):
+        """Reuse only identical pinned scenes with validated, unchanged encoded files."""
+        destination = self.root / 'renders' / job['id']
+        candidates = [r for r in self.store.production_list('renders') if r['id'] != job['id']
+                      and r.get('renderer_version') == job['renderer_version']
+                      and r['snapshot'].get('presentation') == job['snapshot'].get('presentation')
+                      and r['snapshot']['source_label'] == job['snapshot']['source_label']][:5]
+        reused=0
+        for index, scene in enumerate(job['snapshot']['scenes']):
+            for prior in candidates:
+                previous = prior['snapshot']['scenes']
+                digest = prior.get('cache',{}).get(str(index))
+                if not digest or index >= len(previous) or previous[index] != scene:continue
+                fade = index and job['snapshot']['scenes'][index-1]['transition']=='fade'
+                old_fade = index and previous[index-1]['transition']=='fade'
+                if fade != old_fade:continue
+                source = self.root / 'renders' / prior['id'] / f'scene-{index:03}.mp4'
+                if not source.is_file() or checksum(source) != digest:continue
+                destination.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(source,destination / source.name)
+                job['cache'][str(index)]=digest;reused+=1
+                break
+        job['reused_scenes']=reused
 
     async def cancel(self, identity):
         task = self.tasks.get(identity)
@@ -793,11 +945,13 @@ class Production:
     def footage_overlay(self, asset, path, scene=None):
         image = Image.new('RGBA', (1920,1080), (0,0,0,0))
         draw = ImageDraw.Draw(image)
-        draw.rectangle((0,985,1920,1080),fill=(6,23,36,235))
-        broadcast.label(draw,(55,1000),asset['context'].upper()+' FOOTAGE',30)
-        broadcast.label(draw,(55,1044),asset['attribution'][:80]+' · '+asset.get('source_provider','local').upper()+' · event attribution unverified',22,'#a8c4d0')
-        if scene and scene.get('parameters',{}).get('story'):
-            broadcast.story_caption(draw,scene['parameters']['story'],footage=True)
+        catalog = asset.get('catalog', {})
+        context = asset['context'].upper()
+        event = catalog.get('event_id') or ''
+        stamp = catalog.get('captured_at') or catalog.get('capture_date') or ''
+        caption = ' · '.join(str(v) for v in (context, event, stamp) if v)
+        draw.rounded_rectangle((45,40,1100,95),radius=12,fill=(6,23,36,220))
+        broadcast.label(draw,(65,55),caption[:95],24,'#e7f1f8')
         image.save(path)
 
     async def _render(self, job):
@@ -855,7 +1009,11 @@ class Production:
                                 '[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[base];[base][1:v]overlay=0:0:format=auto[out]',
                                 '-map','[out]','-an','-frames:v',str(round(seconds*30)),'-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-threads','2',str(segment)])
                         elif is_broadcast:
-                            await broadcast.render_clip(scene['direction'], scene['parameters'], segment, load_asset=lambda identity: self.map_asset(scene,identity), seconds=scene['seconds'] + (.3 if index > 0 and timeline['scenes'][index-1]['transition']=='fade' else 0))
+                            def scene_progress(fraction):
+                                job.update(progress=round((index+fraction)/len(timeline['scenes'])*75, 1),
+                                           stage=f"Scene {index+1} of {len(timeline['scenes'])} · {round(fraction*100)}%")
+                                self.store.production_update_render(job)
+                            await broadcast.render_clip(scene['direction'], scene['parameters'], segment, load_asset=lambda identity: self.map_asset(scene,identity), seconds=scene['seconds'] + (.3 if index > 0 and timeline['scenes'][index-1]['transition']=='fade' else 0), on_progress=scene_progress)
                         else:
                             if is_cinematic:
                                 shots, count = await asyncio.to_thread(cinematic.frames, timeline, scene, clip, self.observation_path)

@@ -193,3 +193,50 @@ Coastal map labels use official NOAA/NHC breakpoint coordinates. These point
 markers identify places named by the source; they do not infer warning polygons.
 The simple Video Production layout picker also exposes **Satellite report** for
 NOAA imagery and statistics. Satellite frames retain independent observation times.
+
+The approved geographic weather-report style is the default for new production
+plans. Automatic source graphs are enabled: current measurement scenes show
+reported wind and storm-motion bars, and comparison scenes show timestamped wind
+bars and pressure trends over geographic backgrounds. Each topic uses its own
+pinned advisory; forecast points are excluded from observation trends. Missing
+history is shown as a single measurement, and missing values are omitted.
+Explicit maps and footage retain their selected treatment. The automatic-graph
+setting and chart observations are saved in each timeline and export manifest;
+existing timelines keep their original appearance until resaved. Footage carries
+only a compact context/event/date label, with source credits in the manifest.
+
+### Create Video: connected multi-story bulletin
+
+Open **Create Video** to select up to 12 reports, reorder them, choose a 10/20/30/60
+minute target, and build one local narration with source-linked transitions.
+The script and matching scene plan are prepared together. Edit/copy narration,
+upload your recording, fit timing, review visuals and export in the same tab.
+Story choices, unfinished edits and production selections persist on this
+computer; immutable scripts and saved timelines remain in the backend. Existing
+scripts and detailed editorial/visual controls are available in collapsed panels.
+
+The target is a coverage goal, not a guarantee: short sources are never repeated
+to fill the hour. The dashboard shows the supported word count and material gap.
+Long bulletin paragraphs split into visual beats while retaining their source
+and full narration. Timelines accept up to one hour and 600 scenes; actual audio
+must match scene timing. Long exports run locally and may take substantial time.
+
+For a **30-minute bulletin**, start with 6–8 related substantive reports and
+roughly 4,350 sourced words. Bulletin beats contain at most 18 words; map shots
+have a hard 10-second limit, including transitions. After uploading and fitting
+the voiceover, **Build mixed bulletin edit** drafts 3–4-second cuts from the full
+eligible library, keeps source graphs and explicit maps, and reports missing
+footage. A long bulletin with no footage cannot export. See the
+[30-minute workflow](docs/THIRTY_MINUTE_BULLETIN.md).
+
+The **Create Video** bulletin flow also supports **Copy source pack → Paste final
+script → paragraph source mapping → Upload voiceover → local spoken-word timing
+→ mixed edit**. Install optional speech alignment dependencies with
+`.venv/bin/python -m pip install -r backend/requirements-speech.txt` on a fresh
+checkout. New footage acquisition searches the script's actual locations and
+weather topics, imports eligible free archive clips, and shows missing location
+review in the same tab. See [the full workflow](docs/THIRTY_MINUTE_BULLETIN.md).
+
+## Automatic final video flow
+
+Paste refined narration in Create Video, click **Save script & prepare automatically**, upload its matching voiceover, then click **Make final video**. Source matching, numerical checks, spoken timing, short shots, source charts and available footage are prepared locally. See [automatic video flow and limitations](docs/AUTOMATIC_VIDEO_FLOW.md).

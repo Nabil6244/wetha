@@ -14,6 +14,49 @@ from app.main import create_app
 from test_production import prepare, wait_render
 
 
+def test_streaming_encoder_reports_partial_scene_progress(tmp_path, monkeypatch):
+    import asyncio
+    import shutil
+    from app import broadcast
+    if not shutil.which('ffmpeg'):
+        pytest.skip('FFmpeg required')
+    class FastComposer:
+        def __init__(self, *args):
+            pass
+        def frame(self, t):
+            return Image.new('RGB', (1920,1080), '#193b47')
+    monkeypatch.setattr(broadcast, 'Composer', FastComposer)
+    updates = []
+    asyncio.run(broadcast.render_clip({}, {}, tmp_path/'progress.mp4', seconds=2, on_progress=updates.append))
+    assert updates == [.5, 1]
+
+
+def test_automatic_broadcast_keeps_planned_satellite_observations(tmp_path):
+    from datetime import timedelta
+    from test_visuals import synthetic_current
+    from test_production import image
+    with TestClient(create_app(tmp_path)) as client:
+        advisory=synthetic_current(client)
+        store=client.app.state.store
+        for i in range(2):
+            store.save_visual_asset({'kind':'goes','source_url':f'https://example.test/synthetic-{i}.png',
+                'observed_at':(advisory.issued_at+timedelta(minutes=i)).isoformat(),
+                'content_type':'image/png','metadata':{}},image())
+        script=client.post('/api/scripts',json={'advisory_id':advisory.id}).json()
+        plan=client.post('/api/visuals/plans',json={'script_id':script['id'],'expected_revision':1,'style':'satellite'}).json()
+        body={'plan_id':plan['id'],'title':'Satellite preservation test','presentation':'broadcast',
+              'scenes':[{'id':s['id'],'seconds':2} for s in plan['scenes']]}
+        response=client.post('/api/production/timelines',json=body)
+        assert response.status_code==200,response.text
+        scene=next(s for s in response.json()['scenes'] if s['type']=='satellite_timelapse')
+        assert scene['direction']['scene_type']=='satellite_timelapse'
+        assert len(scene['direction']['asset_ids'])==2
+        assert len(scene['parameters']['map_observations'])==2
+        composer=Composer(scene['direction'],scene['parameters'],lambda identity:client.app.state.production.map_asset(scene,identity))
+        assert len(composer.sources)==2
+        assert composer.frame(.5).size==(1920,1080)
+
+
 def source(**changes):
     base={'source_url':'https://www.weather.gov/images/synthetic-test.gif','checksum':'a'*64,'event_id':'AL092020',
           'data_type':'satellite_observation','historical':True,'observation_start':'2020-08-03T12:00:00+00:00',

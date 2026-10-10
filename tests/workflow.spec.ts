@@ -17,7 +17,8 @@ test('phase 5 imports licensed media and renders a source-linked silent preview'
   await page.getByRole('button', {name: 'Import media', exact: true}).click();
   await expect(page.getByRole('status').filter({hasText: 'Media validated'})).toBeVisible();
   await expect(page.locator('.production-media-card')).toHaveCount(1);
-  await page.getByRole('button', {name: 'Video Production', exact: true}).click();
+  await page.getByRole('button', {name: 'Create Video', exact: true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByLabel('SCRIPT FOR NEW PLAN').selectOption(draft.id);
   await page.getByRole('button', {name: 'Prepare scene plan', exact: true}).click();
   await expect(page.getByRole('status').filter({hasText: 'Source-linked scenes prepared'})).toBeVisible();
@@ -50,7 +51,8 @@ test('phase 5 imports licensed media and renders a source-linked silent preview'
   await page.setViewportSize({width: 390, height: 844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.reload();
-  await page.getByRole('button', {name: 'Video Production', exact: true}).click();
+  await page.getByRole('button', {name: 'Create Video', exact: true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await expect(page.locator('.production-job').first()).toContainText('succeeded');
 });
 
@@ -141,7 +143,8 @@ test('newsroom handoffs, revision history and unsupported edits work in the brow
   const original = await narration.inputValue();
   await narration.fill(original + '\n\nUnsupported test claim: landfall tomorrow with 200 mph winds.');
   await page.getByLabel('EDITOR NAME', {exact:true}).fill('Browser revision editor');
-  await page.getByLabel('REVISION NOTE').fill('Exercise the unsupported claim gate');
+  // Saving an edited script does not require an optional revision note.
+  await expect(page.getByRole('button', {name:'Save new revision'})).toBeEnabled();
   await page.getByRole('button', {name:'Save new revision'}).click();
   await expect(page.getByRole('status').filter({hasText:'New revision saved'})).toBeVisible();
   await expect(page.locator('.claim-card.unsupported')).toHaveCount(1);
@@ -252,7 +255,8 @@ test('broadcast style preserves source revision and exposes the historical bench
   await request.post('/api/training/load');
   const draft = await (await request.post('/api/scripts', {data: {advisory_id: 'training:cyclone:2'}})).json();
   await page.goto('/');
-  await page.getByRole('button', {name: 'Video Production', exact: true}).click();
+  await page.getByRole('button', {name: 'Create Video', exact: true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByLabel('SCRIPT FOR NEW PLAN').selectOption(draft.id);
   await page.getByRole('button', {name: 'Prepare scene plan', exact: true}).click();
   await expect(page.getByRole('status').filter({hasText: 'Source-linked scenes prepared'})).toBeVisible();
@@ -307,7 +311,8 @@ test('short template suggests footage, preserves claims and checks timing before
   await page.getByLabel(`${media.name} weather tags`, {exact: true}).fill('wind, rain, storm, waves');
   await card.getByRole('button', {name: 'Save footage tags', exact: true}).click();
   await expect(page.getByRole('status').filter({hasText: 'Footage tags saved'})).toBeVisible();
-  await page.getByRole('button', {name: 'Video Production', exact: true}).click();
+  await page.getByRole('button', {name: 'Create Video', exact: true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN', {exact: true}).selectOption(plan.id);
   await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByRole('button', {name: 'Suggest 30-second edit', exact: true}).click();
@@ -365,7 +370,8 @@ test('long report templates flag insufficient footage instead of stretching grap
   const script = await (await request.post('/api/scripts', {data:{advisory_id:'training:cyclone:2'}})).json();
   const plan = await (await request.post('/api/visuals/plans', {data:{script_id:script.id,expected_revision:script.revision}})).json();
   await page.goto('/');
-  await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
   await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   for (const seconds of [60,90]) {
@@ -381,7 +387,8 @@ test('story draft exposes rewritten beats and retains original source claims', a
   const script = await (await request.post('/api/scripts', {data:{advisory_id:'training:cyclone:2'}})).json();
   const plan = await (await request.post('/api/visuals/plans', {data:{script_id:script.id,expected_revision:script.revision}})).json();
   await page.goto('/');
-  await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
   await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByRole('button',{name:'Build story draft',exact:true}).click();
@@ -404,7 +411,8 @@ test('four map treatments can be selected checked and restored from a saved time
   const script=await (await request.post('/api/scripts',{data:{advisory_id:'training:cyclone:2'}})).json();
   const plan=await (await request.post('/api/visuals/plans',{data:{script_id:script.id,expected_revision:1}})).json();
   await page.goto('/');
-  await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
   await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByLabel('VIDEO STYLE',{exact:true}).selectOption('broadcast');
@@ -427,7 +435,8 @@ test('hour chapters expose missing content and new motion graphics retain saved 
   const script=await (await request.post('/api/scripts',{data:{advisory_id:'training:cyclone:2'}})).json();
   const plan=await (await request.post('/api/visuals/plans',{data:{script_id:script.id,expected_revision:1}})).json();
   await page.goto('/');
-  await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByText('Example videos, regional sources & long programs',{exact:true}).click();
   await expect(page.getByRole('region',{name:'One-hour storm deep dive'})).toContainText('12 chapters');
   await page.getByText('Open chapter structure and content assignments',{exact:true}).click();
@@ -456,7 +465,8 @@ test('regional workflow blocks other-state footage and restores reviewed focus',
   expect(media).toBeTruthy();
   await request.put(`/api/production/media/${media.id}/catalog`,{data:{tags:['rain','wind'],region_codes:['NC'],location_reviewed:true,reference:'https://example.org/synthetic-region-test'}});
   await page.goto('/');
-  await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByText('Example videos, regional sources & long programs',{exact:true}).click();
   await expect(page.getByRole('heading',{name:'Regional relevance',exact:true})).toBeVisible();
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
@@ -473,7 +483,8 @@ test('regional workflow blocks other-state footage and restores reviewed focus',
   await card.getByLabel(`${media.name} location reviewed`,{exact:true}).check();
   await card.getByRole('button',{name:'Save footage tags',exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'Footage tags saved'})).toBeVisible();
-  await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).selectOption(plan.id);
   await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await page.getByLabel('VIDEO STYLE',{exact:true}).selectOption('broadcast');
@@ -482,7 +493,8 @@ test('regional workflow blocks other-state footage and restores reviewed focus',
   await page.getByRole('button',{name:'Save timeline',exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'Timeline saved'})).toBeVisible();
   const timeline=await page.getByLabel('SAVED PRODUCTION TIMELINE').inputValue();
-  await page.reload();await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  await page.reload();await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByLabel('SAVED PRODUCTION TIMELINE').selectOption(timeline);
   await page.getByRole('button', {name:'Edit visuals & timing',exact:true}).click();
   await expect(page.getByLabel('Scene 1 regional focus',{exact:true})).toHaveValue('FL');
@@ -495,7 +507,8 @@ test('manual voiceover copies the script, uploads audio and renders with fitted 
   const draft = await (await request.post('/api/scripts', {data:{advisory_id:'training:cyclone:2'}})).json();
   const plan = await (await request.post('/api/visuals/plans', {data:{script_id:draft.id, expected_revision:draft.revision}})).json();
   await page.goto('/');
-  await page.getByRole('button', {name:'Video Production', exact:true}).click();
+  await page.getByRole('button', {name:'Create Video', exact:true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   await page.getByLabel('PRODUCTION SCENE PLAN', {exact:true}).selectOption(plan.id);
   await expect(page.getByLabel('PROGRAM TITLE',{exact:true})).not.toBeVisible();
   await expect(page.getByRole('navigation',{name:'Video creation steps'})).toBeVisible();
@@ -528,11 +541,14 @@ test('manual voiceover copies the script, uploads audio and renders with fitted 
   await page.getByRole('button',{name:'Make final video',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('match measured narration duration');
   expect((await (await request.get('/api/production')).json()).renders.length).toBe(before);
+  await page.getByText('Estimated timing fallback',{exact:true}).click();
   await page.getByRole('button', {name:'Match video length to voiceover',exact:true}).click();
   await page.getByLabel('I listened and this voiceover matches the script.').check();
   await page.getByLabel('Video title', {exact:true}).fill('Manual voiceover integration');
   await page.getByRole('button', {name:'Make final video',exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'Your video is rendering locally'})).toBeVisible();
+  await expect(page.getByRole('status',{name:'Export progress'})).toContainText('Export');
+  await expect(page.getByRole('button',{name:'Rendering video…',exact:true})).toBeDisabled();
   await expect(page.getByLabel('SAVED PRODUCTION TIMELINE')).not.toHaveValue('');
   const id = await page.getByLabel('SAVED PRODUCTION TIMELINE').inputValue();
   const saved = (await (await request.get('/api/production')).json()).timelines.find((t:{id:string}) => t.id===id);
@@ -541,6 +557,7 @@ test('manual voiceover copies the script, uploads audio and renders with fitted 
   expect(saved.template).toBeNull();
   const job = page.locator('.production-job').filter({has:page.getByRole('heading', {name:'Manual voiceover integration',exact:true})});
   await expect(job).toContainText('full output decoded',{timeout:70000});
+  await expect(page.locator('#production-finish').getByRole('link',{name:'Download final MP4',exact:true})).toBeVisible();
   const completed = (await (await request.get('/api/production')).json()).renders.find((r:{timeline_id:string}) => r.timeline_id===id);
   expect(completed.validation.audio_mode).toBe('imported_narration');
   expect(completed.validation.seconds).toBeCloseTo(seconds,1);
@@ -577,7 +594,8 @@ test('newsroom selects searchable multiple topics and produces one source-linked
   const combined=dashboard.scripts.find((s:{selected_advisory_ids?:string[]}) => s.selected_advisory_ids?.length===2);
   expect(combined.chapters).toHaveLength(2);
   expect(combined.broadcast_eligible).toBe(false);
-  await page.getByRole('button',{name:'Video Production',exact:true}).click();
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await page.getByText('Continue an existing script or saved video', {exact:true}).click();
   const production=await (await request.get('/api/production')).json();
   if(production.user_report.available){
     await expect(page.getByLabel('Your narrated geographic weather edit')).toBeVisible();
@@ -586,4 +604,91 @@ test('newsroom selects searchable multiple topics and produces one source-linked
     expect(artifact.status()).toBe(206);
     expect((await artifact.body()).length).toBe(1024);
   }
+});
+
+test('Create Video builds ordered flowing narration and restores unfinished work in one tab', async ({page,request})=>{
+  await request.post('/api/training/load');
+  await page.goto('/');
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await expect(page.getByLabel('SCRIPT FOR NEW PLAN')).not.toBeVisible();
+  await page.getByLabel('Bulletin target length').selectOption('60');
+  const topics=page.getByRole('group',{name:'Bulletin stories',exact:true});
+  await topics.getByRole('checkbox',{name:/training:cyclone:1$/}).check();
+  await topics.getByRole('checkbox',{name:/training:cyclone:2$/}).check();
+  await page.getByRole('button',{name:'Move story 2 up',exact:true}).click();
+  const response=page.waitForResponse(r=>r.url().endsWith('/api/newsroom/runs')&&r.request().method()==='POST');
+  await page.getByRole('button',{name:'Build flowing bulletin (2 stories)',exact:true}).click();
+  const script=await (await response).json();
+  expect(script.selected_advisory_ids).toEqual(['training:cyclone:2','training:cyclone:1']);
+  expect(script.bulletin.coverage).toBe('needs_more_material');
+  await expect(page.getByRole('heading',{name:'Your complete narration',exact:true})).toBeVisible();
+  await expect(page.locator('#bulletin-narration')).toContainText('not padded');
+  await expect(page.locator('#production-voiceover')).toBeVisible();
+  await expect(page.getByLabel('Video title')).toHaveValue('Weather bulletin · 2 stories');
+  const originalPlan=await page.getByLabel('PRODUCTION SCENE PLAN',{exact:true}).inputValue();
+  await page.getByRole('button',{name:'Edit narration',exact:true}).click();
+  const unfinished=script.text+'\n\nAn unfinished editorial note.';
+  await page.getByLabel('EDIT COMPLETE NARRATION').fill(unfinished);
+  await page.getByLabel('Bulletin editor name').fill('Local editor');
+  await page.reload();
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await expect(page.getByLabel('EDIT COMPLETE NARRATION')).toHaveValue(unfinished);
+  await expect(page.getByLabel('Bulletin editor name')).toHaveValue('Local editor');
+  await expect(page.getByLabel('Bulletin target length')).toHaveValue('60');
+  await expect(page.getByLabel('PRODUCTION SCENE PLAN',{exact:true})).toHaveValue(originalPlan);
+  await expect(page.locator('#production-voiceover')).toBeVisible();
+  await page.getByRole('button',{name:'Discard edits',exact:true}).click();
+  await page.screenshot({path:'test-results/create-video-bulletin.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+});
+
+
+test('Create Video imports polished narration with per-paragraph sources', async ({page,request})=>{
+  await request.post('/api/training/load');await page.goto('/');
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  const topics=page.getByRole('group',{name:'Bulletin stories',exact:true});
+  await topics.getByRole('checkbox',{name:/training:cyclone:1$/}).check();
+  await topics.getByRole('checkbox',{name:/training:cyclone:2$/}).check();
+  await page.getByRole('button',{name:'Build flowing bulletin (2 stories)',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Copy source pack',exact:true})).toBeEnabled();
+  const text='Florida residents should review the first storm report and its official guidance.\n\nThe second report gives a later update with its own issue time and measurements.';
+  await page.getByLabel('Paste final script',{exact:true}).fill(text);
+  await page.getByRole('button',{name:'Match paragraphs to sources',exact:true}).click();
+  const first=page.locator('section[aria-label="Polished narration workflow"] details').filter({hasText:'Paragraph 1'});
+  await expect(first).toBeVisible();
+  if(!await first.locator('select').isVisible())await first.locator('summary').click();
+  await page.getByLabel('Source for paragraph 1',{exact:true}).selectOption('training:cyclone:1');
+  const second=page.locator('section[aria-label="Polished narration workflow"] details').filter({hasText:'Paragraph 2'});
+  if(!await second.locator('select').isVisible())await second.locator('summary').click();
+  await page.getByLabel('Source for paragraph 2',{exact:true}).selectOption('training:cyclone:2');
+  await page.getByLabel('Final script editor',{exact:true}).fill('Local editor');
+  const response=page.waitForResponse(r=>r.url().endsWith('/polished')&&r.request().method()==='POST');
+  await page.getByRole('button',{name:'Save final script & prepare scenes',exact:true}).click();
+  const saved=await (await response).json();
+  expect(saved.claims.map((c:any)=>c.primary_advisory_id)).toEqual(['training:cyclone:1','training:cyclone:2']);
+  expect(saved.claims.every((c:any)=>c.status==='requires_verification')).toBe(true);
+  await expect(page.locator('#bulletin-narration .bulletin-text')).toContainText('Florida residents');
+  await expect(page.locator('#production-voiceover')).toContainText('script revision 2');
+  await page.reload();await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await expect(page.getByLabel('Paste final script',{exact:true})).toHaveValue(text);
+});
+
+test('Create Video automatically saves refined narration without paragraph dropdowns or an editor check', async ({page,request})=>{
+  await request.post('/api/training/load');await page.goto('/');
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  const topics=page.getByRole('group',{name:'Bulletin stories',exact:true});
+  await topics.getByRole('checkbox',{name:/training:cyclone:1$/}).check();
+  await topics.getByRole('checkbox',{name:/training:cyclone:2$/}).check();
+  await page.getByRole('button',{name:'Build flowing bulletin (2 stories)',exact:true}).click();
+  const text='The first storm report describes its winds and official guidance.\n\nThe next report provides an update. Follow the official advice for your area.';
+  await page.getByLabel('Paste final script',{exact:true}).fill(text);
+  const response=page.waitForResponse(r=>r.url().endsWith('/polished')&&r.request().method()==='POST');
+  await page.getByRole('button',{name:'Save script & prepare automatically',exact:true}).click();
+  const saved=await (await response).json();
+  expect(saved.revision).toBe(2);expect(saved.preview_audit.ready).toBe(true);
+  expect(saved.broadcast_eligible).toBe(false);
+  expect(saved.claims.every((c:any)=>c.status==='requires_verification')).toBe(true);
+  await expect(page.locator('#production-voiceover')).toContainText('script revision 2');
+  await expect(page.getByRole('button',{name:'Make final video',exact:true})).toBeEnabled();
 });

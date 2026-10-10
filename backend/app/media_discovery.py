@@ -109,7 +109,7 @@ class MediaDiscovery:
         path = self.folder / (candidate['id'] + '.json')
         if path.exists() and not candidate.get('checksum'):
             recorded = json.loads(path.read_text())
-            if candidate.get('expected_sha1') and recorded.get('expected_sha1') == candidate['expected_sha1']:
+            if (candidate.get('expected_sha1') and recorded.get('expected_sha1') == candidate['expected_sha1']) or (candidate.get('provider')=='nasa' and candidate['download_url']==recorded.get('download_url') and candidate.get('bytes')==recorded.get('bytes')):
                 candidate['checksum'] = recorded.get('checksum')
         path.write_text(json.dumps(candidate))
         return candidate
@@ -126,7 +126,7 @@ class MediaDiscovery:
         if body.kind != 'all':
             query += ' filetype:' + ('video' if body.kind == 'video' else 'bitmap')
         params = {'action': 'query', 'format': 'json', 'generator': 'search', 'gsrsearch': query,
-                  'gsrnamespace': 6, 'gsrlimit': 8, 'prop': 'videoinfo' if body.kind == 'video' else 'imageinfo'}
+                  'gsrnamespace': 6, 'gsrlimit': 24, 'prop': 'videoinfo' if body.kind == 'video' else 'imageinfo'}
         prefix = 'vi' if body.kind == 'video' else 'ii'
         params.update({prefix + 'prop': 'url|size|mime|sha1|extmetadata', prefix + 'urlwidth': 480})
         try:
@@ -149,6 +149,44 @@ class MediaDiscovery:
         except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError):
             return [], ['Wikimedia search is unavailable. Reviewed sources and external search links remain available.']
 
+    async def nasa(self, body):
+        """Real ISS camera footage only; archive context, never current storm evidence."""
+        if body.provider != 'all' or body.kind == 'image':return [], []
+        try:
+            response=await self.client.get('https://images-api.nasa.gov/search',params={'q':body.query,'media_type':'video','page_size':12})
+            response.raise_for_status()
+            if len(response.content)>MAX_RESPONSE:raise ValueError('NASA response exceeds size limit.')
+            rows=[]
+            for item in response.json().get('collection',{}).get('items',[]):
+                data=(item.get('data') or [{}])[0];title=data.get('title','');description=data.get('description','')
+                if not re.search(r'\bISS\b|space station',title,re.I) or re.search(r'animation|visualization|simulation|interview|explainer',title,re.I):continue
+                if 'copyright' in description.lower() or '©' in description or data.get('center')!='JSC':continue
+                collection=item.get('href','')
+                if not safe_url(collection,{'images-assets.nasa.gov'}):continue
+                assets=await self.client.get(collection);assets.raise_for_status()
+                if len(assets.content)>MAX_RESPONSE:continue
+                # NASA catalogs legacy HTTP URLs; request the same official asset over HTTPS.
+                variants=[u.replace('http://images-assets.nasa.gov/','https://images-assets.nasa.gov/',1) for u in assets.json() if isinstance(u,str)]
+                url=next((u for suffix in ('~medium.mp4','~large.mp4') for u in variants if u.endswith(suffix) and safe_url(u,{'images-assets.nasa.gov'})),None)
+                if not url:continue
+                header=await self.client.head(url);header.raise_for_status()
+                size=int(header.headers.get('content-length',MAX_DOWNLOAD))
+                if not 0<size<=MAX_DOWNLOAD:continue
+                identity=data.get('nasa_id','')
+                if not re.fullmatch(r'[\w.-]+',identity):continue
+                page='https://images.nasa.gov/details/'+quote(identity,safe='')
+                rows.append(self.remember({'title':title,'filename':identity[:120]+'.mp4','kind':'video',
+                    'download_url':url,'catalogue_url':page,'source':page,'source_provider':'stock','provider':'nasa',
+                    'context':'archival','attribution':'NASA / Johnson Space Center',
+                    'license':'NASA informational editorial use; https://www.nasa.gov/nasa-brand-center/images-and-media/',
+                    'reuse_basis':'public_domain','reuse_evidence':page+' · NASA/JSC ISS camera footage; NASA media guidelines apply. Retain source acknowledgement; no endorsement.',
+                    'description':plain(description)[:1000],'declared_date':data.get('date_created'),'captured_at':None,
+                    'event_id':None,'location':None,'tags':sorted(topics(title+' '+description)),
+                    'bytes':size,'width':None,'height':None,'expected_sha1':None,'thumbnail_url':None,'preferred_clip_seconds':3.5}))
+                if len(rows)>=4:break
+            return rows, []
+        except (httpx.HTTPError,ValueError,TypeError,KeyError):return [], ['NASA archive search is unavailable.']
+
     async def search(self, body):
         key = (body.query.strip().casefold(), body.provider, body.kind)
         reviewed = self.reviewed()
@@ -168,10 +206,14 @@ class MediaDiscovery:
                     found, warnings = cached[1:]
                 else:
                     found, warnings = await self.commons(body)
+                    if not found and warnings and body.provider=='all':
+                        alternate, alternate_warnings=await self.nasa(body)
+                        found+=alternate;warnings+=alternate_warnings
+                        if alternate:warnings.append('Using NASA ISS archive footage as an alternate source; it is dated context, not current storm imagery.')
                     if len(self.cache) >= 30:
                         self.cache.pop(next(iter(self.cache)))
                     self.cache[key] = (time.monotonic(), found, warnings)
-            rows += [r for r in found if not requested_regions or set(requested_regions) & set(named_regions((r.get('location') or '')+' '+r.get('title','')))]
+            rows += [r for r in found if not requested_regions or set(requested_regions) & set(named_regions((r.get('location') or '')+' '+r.get('title','')+' '+r.get('description','')))]
         context = None
         if body.plan_id:
             plan = self.production.store.visual_plan(body.plan_id)
@@ -210,7 +252,7 @@ class MediaDiscovery:
             raise ValueError('Search for this candidate again before importing.')
         candidate = json.loads(path.read_text())
         url = candidate['download_url']
-        if not safe_url(url, {'videos.pexels.com', 'upload.wikimedia.org'}):
+        if not safe_url(url, {'videos.pexels.com', 'upload.wikimedia.org', 'images-assets.nasa.gov'}):
             raise ValueError('This source does not have an approved media download URL.')
         # Reviewed bytes already in the library never need another download.
         existing = next((m for m in self.production.store.production_list('media') if m['checksum'] == candidate.get('checksum')), None)

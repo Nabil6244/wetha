@@ -118,7 +118,7 @@ class FactVerifier:
 class AIScriptwriter:
     name = 'Scriptwriter'
 
-    async def run(self, evidence: EvidencePacket, intelligence, engine, model_transport=None):
+    async def run(self, evidence: EvidencePacket, intelligence, engine, model_transport=None, bulletin=False, target_minutes=10):
         ids = evidence.selected_advisory_ids or [evidence.advisories[0].id]
         documents = []
         for identity in ids:
@@ -155,6 +155,11 @@ class AIScriptwriter:
             document['source_refs'] = list(dict.fromkeys(item.source_url for item in evidence.advisories))
             document['evidence_manifest'] = [{'id':item.id,'checksum':item.checksum,'source_url':item.source_url,'issued_at':item.issued_at.isoformat(),'expires_at':item.expires_at.isoformat() if item.expires_at else None,'provenance':item.provenance} for item in evidence.advisories]
             document['text'] = '\n\n'.join(claim['text'] for claim in document['claims'])
+        if bulletin:
+            if engine != 'deterministic':
+                raise ValueError('Multi-story bulletins use the local grounded writer.')
+            from .bulletin import assemble
+            document = assemble(document, documents, [intelligence.by_id[i] for i in ids], target_minutes)
         if engine != 'deterministic':
             # Compose only unique catalogue blocks. Duplicates cannot be selected ambiguously.
             if len({block['id'] for block in document['claims']}) != len(document['claims']):
@@ -207,7 +212,7 @@ class Newsroom:
             priority = await step(NewsPrioritizer, {'evidence':evidence_json, 'changes':changed.model_dump(mode='json')}, lambda:NewsPrioritizer().run(evidence, intelligence))
             verified = await step(FactVerifier, evidence_json, lambda:FactVerifier().run(evidence, intelligence))
             package = {'evidence':evidence_json, 'changes':changed.model_dump(mode='json'), 'priority':priority.model_dump(mode='json'), 'verification':verified.model_dump(mode='json')}
-            document, writing = await step(AIScriptwriter, package, lambda:AIScriptwriter().run(evidence, intelligence, request.engine, self.model_transport))
+            document, writing = await step(AIScriptwriter, package, lambda:AIScriptwriter().run(evidence, intelligence, request.engine, self.model_transport, request.bulletin, request.target_minutes))
             document['run_id'] = identity
             # Re-read current feed/evidence state after any slow model request.
             intelligence = IntelligenceDesk(self.store.advisories(), self.store.feeds(), self.store.memberships())

@@ -11,6 +11,10 @@ GROUPS = {
     'snow': ('snow', 'snowfall', 'blizzard'),
     'lightning': ('lightning', 'thunder', 'thunderstorm', 'thunderstorms'),
     'storm': ('storm', 'storms', 'hurricane', 'cyclone', 'typhoon'),
+    'wildfire': ('fire', 'fires', 'wildfire', 'wildfires', 'brushfire'),
+    'tornado': ('tornado', 'tornadoes', 'twister'),
+    'hail': ('hail', 'hailstorm'),
+    'preparedness': ('planning','preparations','prepare','evacuation','evacuations','shelter','sheltered','evacuated','harbor'),
 }
 GRAPHICS = {'storm_track', 'cinematic_weather_map', 'what_changed', 'radar_animation', 'satellite_timelapse'}
 
@@ -20,13 +24,16 @@ def topics(text):
     return {topic for topic, variants in GROUPS.items() if words.intersection(variants)}
 
 
-def rank(scene, assets, advisory, unavailable=()):
-    wanted = topics(scene['script_segment'])
+def rank(scene, assets, advisory, unavailable=(), limit=5):
+    wanted = topics(scene.get('source_claim_text') or scene['script_segment'])
     if scene.get('parameters',{}).get('story',{}).get('beat') in ('context','reveal'):
         wanted |= {'storm','rain','wind','waves'}
     results = []
     for asset in assets:
         if asset['kind'] == 'audio' or asset['id'] in unavailable or not asset.get('rights_confirmed'):
+            continue
+        if 'images.nasa.gov' in asset.get('source','') and not topics(asset.get('name','')):
+            # Query-derived tags alone cannot turn a space launch into weather footage.
             continue
         if not regional.match_media(scene, asset):
             continue
@@ -62,7 +69,7 @@ def rank(scene, assets, advisory, unavailable=()):
                         'context': asset['context'], 'source_provider': asset.get('source_provider', 'local'),
                         'attribution': asset['attribution'], 'source': asset['source'],
                         'label': asset['context'].upper() + ' FOOTAGE'})
-    return sorted(results, key=lambda row: (-row['score'], row['media_id']))[:5]
+    return sorted(results, key=lambda row: (-row['score'], row['media_id']))[:limit]
 
 
 def draft(plan, assets, advisory, unavailable=(), template='short_30'):

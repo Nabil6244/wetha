@@ -28,6 +28,15 @@ def test_named_states_do_not_parse_ordinary_words_as_postal_codes():
     with pytest.raises(ValueError,match='conflicts'):targets(florida_scene(regional_focus='NC'))
 
 
+def test_basin_forecast_and_river_name_do_not_crop_to_one_state():
+    assert named_regions('Mouth of the Mississippi River to Florida') == ['FL']
+    assert named_regions('Mississippi and Alabama coastal areas') == ['AL','MS']
+    scene=florida_scene(script_segment='The center was near latitude 28.4 North. Winds were reported at Dauphin Island, Alabama.')
+    assert targets(scene)==[]
+    scene['regional_focus']='AL'
+    assert targets(scene)==['AL']
+
+
 def test_florida_ranking_excludes_unknown_unreviewed_and_other_state_footage():
     source='https://example.org/synthetic-capture-record'
     def tagged(identity,codes,reviewed=True):

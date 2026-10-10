@@ -3,7 +3,7 @@ import copy
 import hashlib
 import re
 from .contracts import Advisory
-from .newsroom import GroundedScriptWriter
+from .newsroom import GroundedScriptWriter, OPTIONAL_BROADCAST_NOTE
 from .storage import now
 
 
@@ -76,7 +76,12 @@ def rebuild_scenes(document: dict):
     templates = {normalized(scene['script_segment']):scene for scene in reversed(document['grounded_scenes'])}
     document['scenes'] = [{**copy.deepcopy(templates.get(normalized(claim['text']), template)), 'id':f'scene-{i+1}', 'script_segment':claim['text'],
         'target_seconds':round(len(claim['text'].split()) / 145 * 60, 1), 'claim_id':claim['id']} for i, claim in enumerate(document['claims'])]
+    for scene, claim in zip(document['scenes'], document['claims']):
+        scene['parameters']['source_advisory_id'] = claim.get('primary_advisory_id', claim['source_advisory_ids'][0])
     document['estimated_seconds'] = round(len(document['text'].split()) / 145 * 60)
+    if document.get('bulletin'):
+        b = document['bulletin']; words = len(document['text'].split())
+        b.update(word_count=words, estimated_seconds=document['estimated_seconds'], remaining_words=max(0,b['target_minutes']*145-words), coverage='enough_material' if document['estimated_seconds'] >= b['target_minutes']*54 else 'needs_more_material')
 
 
 def attest(document: dict, body, evidence: list[Advisory]) -> dict:
@@ -116,7 +121,7 @@ def evaluate(document: dict, intelligence, evidence: list[Advisory], review=None
     covered = bool(claims) and all(claim['status'] != 'requires_verification' for claim in claims)
     # An edited or model-composed document must retain its fixed safety opening.
     opening = normalized(result['grounded_scenes'][0]['script_segment']) if result.get('grounded_scenes') else ''
-    safety = not opening or (bool(claims) and normalized(claims[0]['text']) == opening)
+    safety = bool(document.get('polished_narration')) or not opening or opening == OPTIONAL_BROADCAST_NOTE or (bool(claims) and normalized(claims[0]['text']) == opening)
     current = label == 'current'
     valid_review = bool(review and review['revision'] == result.get('revision', 1) and current and official and unchanged and covered and safety)
     checks = [
@@ -136,7 +141,7 @@ def evaluate(document: dict, intelligence, evidence: list[Advisory], review=None
         issues.append({'code':'missing_context', 'blocking':True, 'message':'Restore the original opening source context before review.'})
     if len({normalized(claim['text']) for claim in claims}) < len(claims):
         issues.append({'code':'repetition', 'blocking':False, 'message':'Repeated paragraphs need an editorial check.'})
-    if not 30 <= result['estimated_seconds'] <= 300:
+    if not result.get('bulletin') and not 30 <= result['estimated_seconds'] <= 300:
         issues.append({'code':'timing', 'blocking':False, 'message':'Estimated narration is outside 30 seconds to 5 minutes. Audio duration has not been measured.'})
     issues.append({'code':'forecast_uncertainty', 'blocking':False, 'message':'Retain official forecast qualifiers; observed measurements do not establish future conditions.'})
     if not current:

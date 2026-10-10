@@ -15,16 +15,21 @@ def options():
 def named_regions(text):
     # Full names avoid treating ordinary words such as IN, OR and ME as states.
     return [r['code'] for r in catalogue()['regions']
-            if re.search(r'(?<!\w)'+re.escape(r['name'])+r'(?!\w)',text,re.I)]
+            if re.search(r'(?<!\w)'+re.escape(r['name'])+r'(?!\w)'+(r'(?!\s+River\b)' if r['code']=='MS' else ''),text,re.I)]
 
 
 def targets(scene):
-    names=named_regions(scene.get('script_segment',''))
+    scope=scene.get('source_claim_text') or scene.get('script_segment','')
+    names=named_regions(scope)
     focus=scene.get('regional_focus','auto')
     if focus!='auto':
         if names and focus not in names:
             raise ValueError('Scene focus conflicts with the locations named in its script.')
         return [focus]
+    if scene.get('type')=='storm_track' and re.search(r'\b(?:center|centre)\b[\s\S]*\blatitude\b',scope,re.I):
+        # A basin-wide forecast can mention a coastal observation station. That
+        # station must not crop the offshore storm out of the entire scene.
+        return []
     return names
 
 

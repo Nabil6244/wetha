@@ -6,11 +6,14 @@ const net = require('node:net');
 let backend;
 let quitting = false;
 
-function freePort() {
+function freePort(preferred = 0) {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
+    server.once('error', error => {
+      if (preferred && error.code === 'EADDRINUSE') freePort().then(resolve, reject);
+      else reject(error);
+    });
+    server.listen(preferred, '127.0.0.1', () => {
       const port = server.address().port;
       server.close(() => resolve(port));
     });
@@ -23,7 +26,12 @@ async function startBackend() {
     ? path.join(root, 'backend-runtime', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
     : process.env.WETHA_PYTHON || path.join(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
   if (!fs.existsSync(python)) throw new Error('Python runtime is missing. Follow README.md for development setup. Packaged apps require a platform-native backend-runtime bundle.');
-  const port = await freePort();
+  const portFile = path.join(app.getPath('userData'), 'desktop-port.txt');
+  let savedPort = 0;
+  try { savedPort = Number(fs.readFileSync(portFile, 'utf8')); } catch {}
+  const requestedPort = Number(process.env.WETHA_DESKTOP_PORT || savedPort);
+  const port = await freePort(Number.isInteger(requestedPort) && requestedPort >= 1024 && requestedPort <= 65535 ? requestedPort : 0);
+  fs.writeFileSync(portFile, String(port));
   const endpoint = `http://127.0.0.1:${port}`;
   // The backend origin guard needs the chosen loopback origin too.
   backend = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(port)], {
@@ -54,7 +62,7 @@ async function launch() {
   const uiURL = endpoint;
   win.webContents.setWindowOpenHandler(({ url }) => {
     const target = new URL(url);
-    if (target.protocol === 'https:' && ['www.nhc.noaa.gov', 'api.weather.gov', 'www.weather.gov', 'www.star.nesdis.noaa.gov'].includes(target.hostname)) shell.openExternal(url);
+    if (target.protocol === 'https:' && ['www.nhc.noaa.gov', 'api.weather.gov', 'www.weather.gov', 'www.star.nesdis.noaa.gov', 'commons.wikimedia.org', 'creativecommons.org', 'www.pexels.com', 'www.youtube.com', 'youtu.be', 'images.nasa.gov', 'www.nasa.gov'].includes(target.hostname)) shell.openExternal(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event, url) => { if (new URL(url).origin !== uiURL) event.preventDefault(); });

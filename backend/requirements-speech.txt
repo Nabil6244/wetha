@@ -1,0 +1,4 @@
+# Optional local narration alignment. No paid API; CPU inference.
+faster-whisper==1.2.1
+# Newer PyAV 19 removed metadata_errors used by this faster-whisper release.
+av==15.1.0

@@ -10,7 +10,8 @@ interface Candidate {
 interface Results {query: string; results: Candidate[]; warnings: string[]; links: {pexels: string; youtube: string; commons: string}; note: string}
 interface Plan {id: string; script_id: string; scenes: {script_segment: string;regional_targets?:string[]}[]}
 
-export default function MediaDiscovery({plans, scriptNames, imported, regions}: {
+export default function MediaDiscovery({plans, scriptNames, imported, regions, requestedSearch}: {
+  requestedSearch?:{query:string;planId:string};
   regions: {code:string;name:string}[]; plans: Plan[]; scriptNames: Record<string, string>; imported: () => Promise<void>;
 }) {
   const [query, setQuery] = useState('storm rain waves');
@@ -23,6 +24,7 @@ export default function MediaDiscovery({plans, scriptNames, imported, regions}: 
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [rights, setRights] = useState<Record<string, boolean>>({});
+  useEffect(()=>{if(requestedSearch){setQuery(requestedSearch.query);setPlanId(requestedSearch.planId);setResults(null);}},[requestedSearch]);
   useEffect(() => {void api<Results>('/production/discovery').then(setResults).catch(e => setError(e.message));}, []);
   async function search() {
     setBusy(true); setError(''); setNotice(''); setRights({});

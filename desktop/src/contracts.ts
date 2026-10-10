@@ -22,6 +22,8 @@ export interface Intelligence {
   quarantine: {id: string; feed_id: string; source_identifier: string; reason: string; last_seen_at: string}[];
 }
 export interface Script {
+  selected_advisory_ids?: string[]; chapters?: {advisory_id:string;title:string;area:string;claim_ids?:string[]}[];
+  bulletin?: {target_minutes:number;word_count:number;target_words:number;remaining_words:number;estimated_seconds:number;coverage:string;note:string};
   id: string; advisory_id: string; title: string; text: string; status: string; label: string;
   source_refs: string[]; estimated_seconds: number; broadcast_eligible: boolean;
   source_issued_at: string; qc: {check: string; passed: boolean}[];

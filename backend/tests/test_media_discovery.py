@@ -115,3 +115,26 @@ def test_offline_reviewed_stock_youtube_filters_and_no_arbitrary_url(tmp_path):
         youtube = client.post('/api/production/discovery/search', json={'query': 'waves', 'provider': 'youtube', 'live': False}).json()
         assert len(youtube['results']) == 1 and youtube['results'][0]['event_id'] == 'AL112017'
         assert client.post('/api/production/discovery/import', json={'candidate_id': rows[0]['id'], 'rights_confirmed': True, 'url': 'https://localhost/secret'}).status_code == 422
+
+
+def test_nasa_fallback_uses_real_camera_archive_and_preserves_duplicate_checksum(tmp_path):
+    collection='https://images-assets.nasa.gov/video/iss-test/collection.json'
+    video='https://images-assets.nasa.gov/video/iss-test/iss-test~large.mp4'
+    def transport(request):
+        if request.url.host=='commons.wikimedia.org':raise httpx.ConnectError('Synthetic provider outage',request=request)
+        if request.url.host=='images-api.nasa.gov':
+            return httpx.Response(200,json={'collection':{'items':[{'href':collection,'data':[{
+                'nasa_id':'iss-test','center':'JSC','title':'ISS cameras view a storm','media_type':'video',
+                'description':'A dated hurricane offshore near Florida.','date_created':'2019-01-01T00:00:00Z'}]}]}})
+        if str(request.url)==collection:return httpx.Response(200,json=[video.replace('https:','http:')])
+        if request.method=='HEAD' and str(request.url)==video:return httpx.Response(200,headers={'content-length':'1000'})
+        raise AssertionError(str(request.url))
+    with TestClient(create_app(tmp_path,discovery_transport=httpx.MockTransport(transport))) as client:
+        result=client.post('/api/production/discovery/search',json={'query':'Florida storm','provider':'all','kind':'video'}).json()
+        candidate=next(c for c in result['results'] if c['provider']=='nasa')
+        assert candidate['download_url']==video and candidate['context']=='archival'
+        assert candidate['captured_at'] is None and candidate['event_id'] is None
+        assert candidate['regional_status']=='capture_location_review_needed'
+        discovery=client.app.state.discovery
+        discovery.remember({**candidate,'checksum':'remembered-local-checksum'})
+        assert discovery.remember({k:v for k,v in candidate.items() if k!='checksum'})['checksum']=='remembered-local-checksum'

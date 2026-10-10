@@ -2,6 +2,8 @@ from datetime import date, datetime, timezone
 from typing import Literal
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
+MAX_VISUAL_SCENES = 600
+
 
 class Advisory(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -58,6 +60,8 @@ class ScriptRequest(BaseModel):
 
     engine: Literal['deterministic', 'ollama', 'gemini'] = 'deterministic'
     refresh_sources: bool = False
+    bulletin: bool = False
+    target_minutes: Literal[10,20,30,60] = 10
 
 
 class ReviewRequest(BaseModel):
@@ -79,13 +83,18 @@ class EditRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     text: str = Field(min_length=50, max_length=60_000)
     editor: str = Field(min_length=2, max_length=100)
-    note: str = Field(min_length=3, max_length=2000)
+    note: str = Field(default='Narration edited', max_length=2000)
 
-    @field_validator('editor', 'note')
+    @field_validator('note')
+    @classmethod
+    def revision_note(cls, value):
+        return value.strip() or 'Narration edited'
+
+    @field_validator('editor')
     @classmethod
     def not_blank(cls, value):
         if len(value.strip()) < 2:
-            raise ValueError('An editor name and revision note are required.')
+            raise ValueError('An editor name is required.')
         return value.strip()
 
 
@@ -214,11 +223,13 @@ class TimelineRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     plan_id: str
     title: str = Field(min_length=2, max_length=150)
-    scenes: list[ProductionSceneRequest] = Field(min_length=1, max_length=120)
+    scenes: list[ProductionSceneRequest] = Field(min_length=1, max_length=MAX_VISUAL_SCENES)
     narration_id: str | None = None
+    alignment_id: str | None = None
     narration_verified: bool = False
     satellite_context: bool = False
     presentation: Literal['captioned', 'cinematic', 'broadcast'] = 'captioned'
+    automatic_graphs: bool = True
     music: bool = False
     template: Literal['short_30', 'report_60', 'report_90'] | None = None
 
@@ -293,3 +304,17 @@ class DiscoveryImportRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     candidate_id: str = Field(pattern=r'^[a-f0-9]{64}$')
     rights_confirmed: Literal[True]
+
+class PolishedRequest(EditRequest):
+    sources: list[str] = Field(default_factory=list, max_length=600)
+
+class SourceMapRequest(BaseModel):
+    text: str = Field(min_length=50, max_length=60_000)
+
+class AlignmentRequest(BaseModel):
+    plan_id: str
+    narration_id: str
+
+class FootageExpansionRequest(BaseModel):
+    plan_id: str
+    max_new_clips: int = Field(default=12, ge=1, le=24)

@@ -17,8 +17,8 @@ export async function uploadNarration(file: File, maxBytes: number): Promise<Nar
   return result;
 }
 
-export default function ManualNarration({text, label, maxBytes, disabled, onUpload}: {
-  text: string; label: string; maxBytes: number; disabled: boolean;
+export default function ManualNarration({text, label, maxBytes, disabled, onUpload, compact = false}: {
+  text: string; label: string; maxBytes: number; disabled: boolean; compact?: boolean;
   onUpload: (file: File) => Promise<boolean>;
 }) {
   const [file, setFile] = useState<File | null>(null);
@@ -26,15 +26,17 @@ export default function ManualNarration({text, label, maxBytes, disabled, onUplo
   const [copyStatus, setCopyStatus] = useState('');
   const [inputKey, setInputKey] = useState(0);
   return <section className="panel" aria-label="Manual voiceover workflow">
-    <div className="panel-header"><h2>2. Copy script &amp; upload voiceover</h2><span className="pill">No generation credits</span></div>
+    <div className="panel-header"><h2>2. Upload your voiceover</h2><span className="pill">No generation credits</span></div>
     <div className="detail-body">
-      <p>Copy the narration below, record it or use your preferred voice tool, then upload the finished audio for this video.</p>
+      <p>{compact ? 'Record the complete narration above, then upload the finished audio here.' : 'Copy the narration below, record it or use your preferred voice tool, then upload the finished audio for this video.'}</p>
       <p className="muted">{label}</p>
+      {compact ? <details><summary>Read or copy the voiceover script</summary><textarea aria-label="Voiceover script" readOnly value={text} rows={8} style={{width:'100%'}}/></details> : <>
       <textarea aria-label="Voiceover script" readOnly value={text} rows={8} style={{width:'100%'}}/>
       <button className="button secondary" disabled={disabled || !text} onClick={() => {
         void navigator.clipboard.writeText(text).then(() => setCopyStatus('Script copied.')).catch(() => setCopyStatus('Select the script above and copy it manually.'));
       }}><Copy size={15}/>Copy voiceover script</button>
       {copyStatus && <p role="status">{copyStatus}</p>}
+      </>}
       <form onSubmit={e => {e.preventDefault(); if (file) void onUpload(file).then(success => {
         if (success) {setFile(null); setRights(false); setInputKey(old => old+1);}
       });}}>
