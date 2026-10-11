@@ -159,6 +159,16 @@ class Orchestrator:
                 await spc.collect(self.store, self.visuals.client, 1)
             except ValueError as error:
                 problems.append(str(error))
+            for product in spc.PROBABILITY:
+                try:
+                    await spc.collect(self.store, self.visuals.client, 1, product=product)
+                    found.append(f'SPC {spc.PROBABILITY[product].lower()} probability outlook')
+                except ValueError as error:
+                    # "No risk area" is a real low-risk forecast, not a failure.
+                    if 'no risk area' in str(error):
+                        found.append(str(error).rstrip('.'))
+                    else:
+                        problems.append(str(error))
         job['issues'] += [{'code': 'data_unavailable', 'message': m} for m in problems]
         job['data'] = {'collected': found, 'unavailable': problems}
         self.stage(job, 'data', 'done', ' · '.join(found)[:180] or 'No story data available')

@@ -685,7 +685,9 @@ class Production:
                 advisory = self.store.advisory(scene['parameters'].get('source_advisory_id', script['advisory_id']))
                 intent = classify(scene['script_segment'], story_text(advisory))
                 if intent['intent'] == 'tornado' or intent['hazard'] in ('tornado', 'severe_storm'):
-                    outlook = spc.find(self.store, advisory.issued_at)
+                    # The hazard's own probability map when one covers the story time, else the categorical risk.
+                    product = spc.product_for(scene['script_segment'], intent['hazard'])
+                    outlook = (spc.find(self.store, advisory.issued_at, product) if product != 'cat' else None) or spc.find(self.store, advisory.issued_at)
                     if outlook:
                         scene['parameters']['outlook'] = outlook
             from .visual_states import assign as assign_states

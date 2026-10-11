@@ -41,6 +41,20 @@
       "sha256": "b4ed0eeba4bfcbb25a8e76ed4f3a08a3d6e7c0a517507848946e2d462a93d8de",
       "captured_on": "2026-10-09",
       "selection": "Unmodified complete official archive response; historical August 2020 product"
+    },
+    {
+      "file": "spc-day1-torn-2026-10-11.json",
+      "source_url": "https://www.spc.noaa.gov/products/outlook/day1otlk_torn.lyr.geojson",
+      "sha256": "e9455450c117f2858fc60775fbd23bd0cc1efdc231c833bd4c53fcd798ea77b7",
+      "captured_on": "2026-10-11",
+      "selection": "Unmodified complete GeoJSON response"
+    },
+    {
+      "file": "spc-day1-hail-2026-10-11.json",
+      "source_url": "https://www.spc.noaa.gov/products/outlook/day1otlk_hail.lyr.geojson",
+      "sha256": "5f1e7dd0bdc63f8ae9d83998e9cda6a305416baf6093a4a5903fabc95d59a69a",
+      "captured_on": "2026-10-11",
+      "selection": "Unmodified complete GeoJSON response"
     }
   ]
 }
