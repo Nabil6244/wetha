@@ -10,17 +10,43 @@ from . import regional, media_selection
 
 BUDGET=500*1024*1024
 MAX_QUERIES=24
+DOWNLOADS=3
+MIN_FREE=2*1024**3
+ALLOWED_BASIS=('cc_by','public_domain','stock_license')
+
+
+def free_space(directory):
+    import shutil
+    try:return shutil.disk_usage(directory or '.').free
+    except OSError:return MIN_FREE
+
+
+# What to search for, per topic: concrete shot descriptions rather than single weather words.
+PHRASES={
+    'flood':['flooded street','flooded neighborhood','flash flood water'],'waves':['storm surge waves','coastal flooding waves'],
+    'rain':['heavy rain street','torrential rain'],'wind':['strong wind trees storm','hurricane wind'],'storm':['storm clouds','thunderstorm'],
+    'tornado':['tornado','tornado damage'],'damage':['storm damage houses','debris after storm'],'rescue':['flood rescue boat','emergency crews storm'],
+    'cleanup':['storm cleanup','flood cleanup'],'power':['power lines down storm'],'traffic':['flooded road cars'],'lightning':['lightning storm night'],
+    'snow':['snowstorm','blizzard'],'hail':['hail storm'],'ice':['ice storm'],'heat':['heat wave city'],'wildfire':['wildfire smoke'],
+    'preparedness':['sandbags flood','evacuation traffic'],'residents':['neighborhood flooding residents'],'sky':['dark storm clouds'],
+}
 
 
 def needs(plan,store):
+    """Searches built from each beat: its place, its hazard and the kind of shot it needs."""
+    from .visual_director import classify, story_text
     result={}
     names={r['code']:r['name'] for r in regional.options()}
     for scene in plan['scenes']:
         scope=scene.get('source_claim_text') or scene['script_segment']
+        advisory=store.advisory(scene['parameters']['source_advisory_id'])
         topics=sorted(media_selection.topics(scope))
+        intent=classify(scene['script_segment'],story_text(advisory)) if hasattr(advisory,'title') else {'footage_class':'phenomenon'}
+        # Prefer topics in the shot class the beat needs (impact beats search impact footage first).
+        wanted=media_selection.SHOT_CLASSES.get(intent['footage_class'],set())
+        topics=sorted(topics,key=lambda t:(t not in wanted,t))
         if not topics:continue
         regions=regional.named_regions(scope)
-        advisory=store.advisory(scene['parameters']['source_advisory_id'])
         if not regions:
             regions=regional.named_regions(advisory.area)
             # Marine distances such as "20 NM" are nautical miles, not New Mexico.
@@ -30,11 +56,12 @@ def needs(plan,store):
             regions=regional.named_regions(advisory.text)
         regions=list(dict.fromkeys(regions))
         location=' '.join(names[r] for r in regions) or advisory.area[:80]
-        # Search variants separately instead of requiring every weather term in one title.
         for topic in topics[:3]:
-            query=(location+' '+topic).strip()[:160]
-            row=result.setdefault(query,{'query':query,'regions':regions,'scene_ids':[]})
-            row['scene_ids'].append(scene['id'])
+            # Located query first (best evidence), then the plain shot description (most stock footage is unlocated).
+            phrase=PHRASES.get(topic,[topic])[0]
+            for query,scoped in (((location+' '+topic).strip(),True),(phrase,False)):
+                row=result.setdefault(query[:160],{'query':query[:160],'regions':regions if scoped else [],'scene_ids':[]})
+                row['scene_ids'].append(scene['id'])
     # Search the biggest gaps first: needs shared by the most beats.
     return sorted(result.values(),key=lambda r:-len(r['scene_ids']))
 
@@ -93,29 +120,51 @@ class FootageExpansion:
                 result=await self.discovery.search(MediaDiscoveryRequest(query=need['query'],provider='all',kind='video',plan_id=plan['id'],live=True))
                 job['searched']+=1;self.save(job)
                 job['issues'].extend(result['warnings'])
+                eligible=[]
                 for candidate in result['results']:
-                    if len(job['imported'])>=job['max_new_clips']:break
                     if candidate['id'] in seen:continue
                     seen.add(candidate['id'])
                     if candidate.get('local_media_id'):
                         job['duplicates']+=1;continue
-                    if candidate['kind']!='video' or candidate.get('reuse_basis') not in ('cc_by','public_domain'):continue
+                    if candidate['kind']!='video' or candidate.get('reuse_basis') not in ALLOWED_BASIS:continue
                     if candidate.get('width') and candidate['width']<640:continue
-                    # Unknown sizes are checked after download; the per-file 250 MiB limit still applies.
-                    size=candidate.get('bytes') or 0
-                    if downloaded+size>BUDGET:
-                        job['issues'].append('This batch reached its 500 MiB download budget. Run another batch for remaining needs.');continue
-                    job['stage']='Adding '+candidate['title']
-                    try:
-                        asset=await self.discovery.import_candidate(DiscoveryImportRequest(candidate_id=candidate['id'],rights_confirmed=True))
-                        if asset.get('duplicate'):job['duplicates']+=1;continue
-                        downloaded+=asset.get('bytes') or size
+                    eligible.append(candidate)
+                room=job['max_new_clips']-len(job['imported'])
+                # Bounded parallel downloads; each file still counts its real bytes against the batch budget.
+                gate=asyncio.Semaphore(DOWNLOADS)
+                async def fetch(candidate):
+                    nonlocal downloaded
+                    async with gate:
+                        if len(job['imported'])>=job['max_new_clips']:return
+                        size=candidate.get('bytes') or 0
+                        if downloaded+size>BUDGET:
+                            job['issues'].append('This batch reached its 500 MiB download budget. Run another batch for remaining needs.');return
+                        if free_space(self.directory)<MIN_FREE:
+                            job['issues'].append('Less than 2 GiB of disk space is free; downloads paused.');return
+                        downloaded+=size  # Reserve now so parallel downloads cannot overshoot the budget.
+                        job['stage']='Adding '+candidate['title']
+                        for attempt in range(3):
+                            try:
+                                asset=await self.discovery.import_candidate(DiscoveryImportRequest(candidate_id=candidate['id'],rights_confirmed=True))
+                                break
+                            except ValueError as error:
+                                transient='download failed' in str(error)
+                                if not transient or attempt==2:
+                                    downloaded-=size;job['issues'].append(candidate['title']+': '+str(error));return
+                                await asyncio.sleep(1.5*(2**attempt))
+                            except KeyError as error:
+                                downloaded-=size;job['issues'].append(candidate['title']+': '+str(error));return
+                        if asset.get('duplicate'):
+                            downloaded-=size;job['duplicates']+=1;return
+                        downloaded+=(asset.get('bytes') or 0)-size
                         if asset.get('seconds') and asset['seconds']<5:
                             job['issues'].append(asset['name']+': under five seconds; it gives at most one cut.')
-                        job['imported'].append({'id':asset['id'],'name':asset['name'],'query':need['query'],
-                            'seconds':asset['seconds'],'source':asset['source'],'license':asset['license'],
-                            'needs_location_review':bool(need['regions']), 'required_regions':need['regions']})
-                    except (ValueError,KeyError) as error:job['issues'].append(candidate['title']+': '+str(error))
+                        if len(job['imported'])<job['max_new_clips']:
+                            job['imported'].append({'id':asset['id'],'name':asset['name'],'query':need['query'],
+                                'seconds':asset['seconds'],'source':asset['source'],'license':asset['license'],
+                                'needs_location_review':bool(need['regions']), 'required_regions':need['regions']})
+                        self.save(job)
+                await asyncio.gather(*(fetch(c) for c in eligible[:max(0,room)*2]))
                 if len(job['imported'])>=job['max_new_clips']:break
             job.update(status='completed',progress=1,stage=f"Added {len(job['imported'])} new recordings")
             if not job['imported']:job['issues'].append('No new eligible clips found in this batch. Existing duplicates were skipped; add another source or broaden the location search.')

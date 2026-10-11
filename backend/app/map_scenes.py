@@ -9,7 +9,7 @@ from . import broadcast
 MODES={'track':'REPORTED MOVEMENT','warnings':'WARNING AREAS','radar':'RADAR: OBSERVED WEATHER','forecast':'FORECAST OUTLOOK'}
 
 
-def prepare(service, scene, advisory, source):
+def prepare(service, scene, advisory, source, radar_assets=None):
     mode=scene['map_mode'];p=scene['parameters'];features=p.get('geojson',{}).get('features',[])
     p['map_mode']=mode;p['map_warning_text']=advisory.warnings[:3] or ([advisory.area] if advisory.area else [])
     p['map_source_label']='TRAINING' if advisory.provider=='TRAINING' else 'PRERECORDED' if source.historical else 'SOURCE RECORD'
@@ -35,7 +35,8 @@ def prepare(service, scene, advisory, source):
             fallback='Forecast geometry with matching issue and valid times is unavailable. Source wording only; no predicted path drawn.'
     elif mode=='radar':
         layers=[]
-        assets=sorted([a for a in service.store.visual_assets('radar') if abs((datetime.fromisoformat(a['observed_at'])-advisory.issued_at).total_seconds())<=3600 and a['metadata'].get('projection')=='EPSG:3857'],key=lambda a:a['observed_at'])[-6:]
+        pool=radar_assets if radar_assets is not None else service.store.visual_assets('radar')
+        assets=sorted([a for a in pool if abs((datetime.fromisoformat(a['observed_at'])-advisory.issued_at).total_seconds())<=3600 and a['metadata'].get('projection')=='EPSG:3857'],key=lambda a:a['observed_at'])[-6:]
         if len(assets)>=2 and len({tuple(a['metadata']['extent']) for a in assets})==1 and advisory.provider!='TRAINING':
             p['radar_extent']=assets[0]['metadata']['extent'];p['bounds']=p['radar_extent']
             for a in assets:

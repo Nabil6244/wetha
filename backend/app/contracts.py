@@ -193,7 +193,8 @@ class MediaImportMetadata(BaseModel):
 class FootageCutRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
     media_id: str
-    seconds: float = Field(ge=3, le=4)
+    # Matches the automatic edit: cuts of 2.5-5 seconds (one cut for beats under five seconds).
+    seconds: float = Field(ge=2.5, le=5)
     trim_start: float = Field(default=0, ge=0, le=3600)
 
 
@@ -233,6 +234,9 @@ class TimelineRequest(BaseModel):
     music: bool = False
     # With imported narration: a quiet original instrumental that ducks under the voice, plus soft transition sounds.
     music_bed: bool = True
+    # Footage whose filming location is unknown may illustrate a beat that names a place, always labelled
+    # "location not verified" on screen. Footage reviewed as filmed elsewhere is never used.
+    unverified_location_footage: bool = True
     template: Literal['short_30', 'report_60', 'report_90'] | None = None
 
 
@@ -316,6 +320,20 @@ class SourceMapRequest(BaseModel):
 class AlignmentRequest(BaseModel):
     plan_id: str
     narration_id: str
+
+class AutoProductionRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    plan_id: str
+    narration_id: str
+    title: str = Field(min_length=2, max_length=150)
+    # Required when speech alignment matches less than 95% of the script.
+    narration_verified: bool = False
+    find_footage: bool = False
+    max_new_clips: int = Field(default=8, ge=1, le=24)
+    music_bed: bool = True
+    # Optional fitted scene timing, used only if local speech alignment cannot run or fails.
+    scenes: list[ProductionSceneRequest] | None = Field(default=None, max_length=MAX_VISUAL_SCENES)
+
 
 class FootageExpansionRequest(BaseModel):
     plan_id: str

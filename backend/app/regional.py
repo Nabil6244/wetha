@@ -33,6 +33,17 @@ def targets(scene):
     return names
 
 
+def location_status(scene,asset):
+    """'unscoped' (beat names no place), 'reviewed' (reviewed capture region matches), 'elsewhere'
+    (reviewed capture region is another place), or 'unverified' (location unknown or only declared)."""
+    wanted=targets(scene)
+    if not wanted:return 'unscoped'
+    if match_media(scene,asset):return 'reviewed'
+    cat=asset.get('catalog',{})
+    if cat.get('location_reviewed') and cat.get('region_codes'):return 'elsewhere'
+    return 'unverified'
+
+
 def match_media(scene,asset):
     wanted=targets(scene)
     if not wanted:return True
@@ -54,7 +65,7 @@ def intersects(bounds,geometry):
                 max(p[1] for p in coords)<south or min(p[1] for p in coords)>north)
 
 
-def focus(scene,media,presentation):
+def focus(scene,media,presentation,allow_unverified=False):
     wanted=targets(scene)
     if not wanted:return {'regions':[], 'status':'unscoped'}
     regions=[r for r in catalogue()['regions'] if r['code'] in wanted]
@@ -63,9 +74,12 @@ def focus(scene,media,presentation):
     selected=[media[c['media_id']] for c in scene.get('cuts',[])]
     if scene.get('media_id'):selected.append(media[scene['media_id']])
     if selected:
-        for asset in selected:
-            if not match_media(scene,asset):
-                raise ValueError(f"{names}: {asset['name']} needs a matching capture region and a reviewed location reference. Unknown or unrelated footage cannot cover this scene.")
+        statuses=[location_status(scene,asset) for asset in selected]
+        for asset,status in zip(selected,statuses):
+            if status=='reviewed' or (allow_unverified and status=='unverified'):continue
+            raise ValueError(f"{names}: {asset['name']} needs a matching capture region and a reviewed location reference. Unknown or unrelated footage cannot cover this scene.")
+        if 'unverified' in statuses:
+            return {'regions':wanted,'status':'illustrative_location_not_verified','note':'Illustrative footage; its filming location is not verified and is labelled on screen.'}
         return {'regions':wanted,'status':'reviewed_capture_location','note':'Location is editor-attested from the recorded reference; event attribution remains separately labeled.'}
     if presentation!='broadcast':
         raise ValueError(f'{names}: use Broadcast style for a region-focused source graphic or choose location-reviewed footage.')

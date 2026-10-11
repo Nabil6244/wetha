@@ -11,14 +11,16 @@ import re
 import shutil
 import subprocess
 import textwrap
+import time
 from pathlib import Path
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import uuid4, UUID
+from concurrent.futures.process import BrokenProcessPool
 
 from PIL import Image, ImageDraw, ImageFont
 
 from .storage import RevisionConflict, now
-from . import cinematic, broadcast, media_selection, regional, footage_library, audio_polish
+from . import cinematic, broadcast, media_selection, regional, footage_library, audio_polish, production_report, packaging
 
 MAX_UPLOAD = 250 * 1024 * 1024
 RENDERER_VERSION = 17
@@ -350,6 +352,23 @@ class Production:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def storyboard(self, timeline):
+        """Contact sheet and animatic for a timeline (saved or prepared), before rendering."""
+        from . import storyboard
+        identity = str(uuid4());directory = self.root / 'storyboards' / identity
+        media = {m['id']: m for m in self.store.production_list('media')}
+        audio = self.media_path(media[timeline['narration_id']]) if timeline.get('narration_id') else None
+        result = storyboard.build(self, timeline, media, directory, audio)
+        return {'id': identity, **result}
+
+    def storyboard_path(self, identity, kind):
+        names = {'sheet': 'storyboard.jpg', 'preview': 'preview.mp4', 'json': 'storyboard.json'}
+        str(UUID(identity))  # Only generated identifiers become paths.
+        path = self.root / 'storyboards' / identity / names[kind]
+        if not path.is_file():
+            raise KeyError(identity)
+        return path
+
     def analyze_shots(self):
         """Backfill internal shot changes for library videos imported before shot analysis."""
         analyzed, failed = 0, []
@@ -362,7 +381,7 @@ class Production:
                 shots = None
             if shots is None:
                 failed.append(asset['name']);continue
-            self.store.production_save('media', {**asset, 'shot_starts': shots})
+            self.store.production_update_media({**asset, 'shot_starts': shots})
             analyzed += 1
         return {'analyzed': analyzed, 'failed': failed}
 
@@ -586,6 +605,7 @@ class Production:
             apply_places(scene['parameters'], self.store.advisory(scene['parameters'].get('source_advisory_id',script['advisory_id'])),scene['script_segment'])
         if body.presentation == 'broadcast':
             advisory = self.store.advisory(script['advisory_id'])
+            story_layers = {}
             for scene in scenes:
                 advisory = self.store.advisory(scene['parameters'].get('source_advisory_id', script['advisory_id']))
                 source = broadcast.VisualSource(source_url=advisory.source_url, checksum=advisory.checksum,
@@ -631,9 +651,20 @@ class Production:
                 if scene['graphic_style'] != 'auto':
                     from .graphic_styles import prepare as prepare_graphic
                     prepare_graphic(scene,advisory)
+                if body.automatic_graphs and scene['map_mode'] == 'auto' and scene['graphic_style'] == 'auto' and not scene['media_id'] and not scene['cuts']:
+                    # Real data layers the director may choose for this story: county outlines, radar, satellite.
+                    if advisory.id not in story_layers:
+                        from . import geography, observations
+                        story_layers[advisory.id] = {
+                            'county_shapes': geography.county_shapes(self.store, advisory) if advisory.provider == 'NWS' else [],
+                            'radar_option': observations.radar_option(self, advisory, scene['parameters'], source),
+                            'satellite_option': observations.satellite_option(self, advisory, scene['parameters'], source)}
+                    for key, value in story_layers[advisory.id].items():
+                        if value:
+                            scene['parameters'][key] = value
         plotted_claims={}
         for scene in scenes:
-            scene['regional_relevance'] = regional.focus(scene, media, body.presentation)
+            scene['regional_relevance'] = regional.focus(scene, media, body.presentation, body.unverified_location_footage)
             if body.automatic_graphs and body.presentation == 'broadcast':
                 from .report_graphs import prepare as prepare_report_graphs
                 advisory = self.store.advisory(scene['parameters'].get('source_advisory_id', script['advisory_id']))
@@ -645,11 +676,26 @@ class Production:
                     if plotted_claims.setdefault(key, section) == section:
                         scene['parameters']['report_graphs'] = graph
         if body.automatic_graphs and body.presentation == 'broadcast':
+            # Severe-weather beats get the SPC outlook valid at their story time, when one was collected.
+            from . import spc
+            from .visual_director import classify, story_text
+            for scene in scenes:
+                if scene.get('media_id') or scene.get('cuts'):
+                    continue
+                advisory = self.store.advisory(scene['parameters'].get('source_advisory_id', script['advisory_id']))
+                intent = classify(scene['script_segment'], story_text(advisory))
+                if intent['intent'] == 'tornado' or intent['hazard'] in ('tornado', 'severe_storm'):
+                    outlook = spc.find(self.store, advisory.issued_at)
+                    if outlook:
+                        scene['parameters']['outlook'] = outlook
             from .visual_states import assign as assign_states
             assign_states(scenes, lambda identity: self.store.advisory(identity or script['advisory_id']))
+        visual_plan = []
         if body.presentation == 'broadcast':
             from .visual_states import transitions
+            from .visual_director import annotate
             transitions(scenes)
+            visual_plan = annotate(scenes, lambda identity: self.store.advisory(identity or script['advisory_id']), media)
         total = sum(s['frames'] for s in scenes) / 30
         targets = {'short_30':30,'report_60':60,'report_90':90}
         if body.template and total != targets[body.template]:
@@ -691,6 +737,7 @@ class Production:
                     'source_refs': script['source_refs'], 'evidence_manifest': script['evidence_manifest'],
                     'scenes': scenes, 'seconds': total, 'narration_id': body.narration_id,
                     'presentation': body.presentation, 'music': body.music,
+                    'unverified_location_footage': body.unverified_location_footage,
                     'music_bed': bool(narration and body.music_bed and body.presentation == 'broadcast'),
                     'automatic_graphs': body.automatic_graphs, 'visual_preset': 'geographic_newsroom_v1' if body.presentation == 'broadcast' else body.presentation,
                     'bulletin_target_minutes':script.get('bulletin',{}).get('target_minutes',0),
@@ -702,6 +749,7 @@ class Production:
                     'alignment_id':body.alignment_id, 'alignment_coverage':aligned['coverage'] if aligned else None,
                     'timing_basis': aligned['timing_basis'] if aligned else 'Manual scene timing; matched to imported audio' if narration else 'Manual scene timing',
                     'preview_audit':script.get('preview_audit'),
+                    'visual_plan':visual_plan,
                     'broadcast_eligible': False, 'created_at': now()}
         if persist:
             map_issues = self.map_hold_issues(document)
@@ -808,7 +856,7 @@ class Production:
                 for cut in scene.get('cuts',[]):
                     pinned[cut['media_id']] = {**media[cut['media_id']], 'catalog':cut.get('selection_catalog',{})}
                 if scene.get('media_id') or scene.get('cuts'):
-                    regional.focus(copy.deepcopy(scene), pinned, timeline.get('presentation','captioned'))
+                    regional.focus(copy.deepcopy(scene), pinned, timeline.get('presentation','captioned'), timeline.get('unverified_location_footage', False))
                 elif not scene.get('regional_relevance'):
                     raise ValueError('Re-save this regional timeline to apply location relevance checks.')
         return {**timeline, 'source_label': script['label']}, media
@@ -881,9 +929,12 @@ class Production:
         job = self.store.production_get('renders', identity)
         if job['status'] != 'succeeded':
             raise ValueError('A validated completed render is required for export.')
-        names = {'video': 'program.mp4', 'subtitles': 'captions.srt', 'manifest': 'manifest.json'}
+        names = {'video': 'program.mp4', 'subtitles': 'captions.srt', 'manifest': 'manifest.json', 'report': 'report.json',
+                 'report_md': 'report.md', 'thumbnail': 'thumbnail.jpg', 'metadata': 'metadata.json'}
         path = self.root / 'renders' / job['id'] / names[kind]
-        expected = job['validation']['checksums'][kind]
+        expected = job['validation']['checksums'].get(kind)
+        if expected is None:
+            raise ValueError('This render predates production reports; render again to create one.')
         if not path.is_file() or checksum(path) != expected:
             raise ValueError('The render export is missing or changed; it cannot be served as a validated output.')
         return path
@@ -1024,8 +1075,16 @@ class Production:
         event = catalog.get('event_id') or ''
         stamp = catalog.get('captured_at') or catalog.get('capture_date') or ''
         caption = ' · '.join(str(v) for v in (context, event, stamp) if v)
+        if scene is not None and regional.location_status(scene, asset) == 'unverified':
+            caption += ' · LOCATION NOT VERIFIED'
         draw.rounded_rectangle((45,40,1100,95),radius=12,fill=(6,23,36,220))
         broadcast.label(draw,(65,55),caption[:95],24,'#e7f1f8')
+        if scene is not None:
+            from .geography import mentions, locator
+            places = mentions(scene.get('script_segment', ''))
+            if places:
+                inset = locator(places)
+                image.alpha_composite(inset, (1920 - inset.width - 45, 1080 - inset.height - 60))
         image.save(path)
 
     def captions(self, timeline):
@@ -1038,12 +1097,23 @@ class Production:
                 pages = text_pages(scene['script_segment'])
             else:
                 pages = text_pages(scene['script_segment'], width=43, lines=15)
-            # Each page holds the screen in proportion to its words.
-            weights = [max(1, len(page.split())) for page in pages];elapsed = 0
-            for page, weight in zip(pages, weights):
-                start = cursor + scene['seconds'] * elapsed / sum(weights);elapsed += weight
-                end = cursor + scene['seconds'] * elapsed / sum(weights)
-                rows.append(f'{len(rows)+1}\n{srt_time(start)} --> {srt_time(end)}\n{page}\n')
+            spoken = scene.get('word_frames')
+            counts = [len(page.split()) for page in pages]
+            if spoken and len(spoken) == sum(counts):
+                # Recognized speech: each page appears when its first word is spoken.
+                starts, index = [], 0
+                for count in counts:
+                    starts.append(cursor + spoken[index] / 30);index += count
+                ends = starts[1:] + [cursor + scene['seconds']]
+            else:
+                # No word timing: each page holds the screen in proportion to its words.
+                weights = [max(1, c) for c in counts];total = sum(weights);elapsed = 0;starts, ends = [], []
+                for weight in weights:
+                    starts.append(cursor + scene['seconds'] * elapsed / total);elapsed += weight
+                    ends.append(cursor + scene['seconds'] * elapsed / total)
+            for page, start, end in zip(pages, starts, ends):
+                if end - start >= 1 / 30:
+                    rows.append(f'{len(rows)+1}\n{srt_time(start)} --> {srt_time(end)}\n{page}\n')
             cursor += scene['seconds']
         return '\n'.join(rows)
 
@@ -1128,8 +1198,13 @@ class Production:
         elif is_broadcast:
             before = scenes[index-1] if index else None
             previous = (before['direction'], before['parameters'], self.scene_assets(before), before['seconds']) if before and scene['parameters'].get('transition_in') else None
-            await asyncio.get_running_loop().run_in_executor(self.pool(), broadcast.render_clip_blocking, scene['direction'], scene['parameters'],
-                str(segment), self.scene_assets(scene), scene['seconds'] + handle, previous)
+            arguments = (scene['direction'], scene['parameters'], str(segment), self.scene_assets(scene), scene['seconds'] + handle, previous)
+            try:
+                await asyncio.get_running_loop().run_in_executor(self.pool(), broadcast.render_clip_blocking, *arguments)
+            except BrokenProcessPool:
+                # Worker processes could not start (e.g. an unimportable main module); render here instead.
+                self._pool = None
+                await asyncio.to_thread(broadcast.render_clip_blocking, *arguments)
         else:
             if is_cinematic:
                 shots, count = await asyncio.to_thread(cinematic.frames, timeline, scene, clip, self.observation_path)
@@ -1197,8 +1272,12 @@ class Production:
                 self.store.production_update_render(job)
                 work = self.root / 'renders' / job['id']
                 work.mkdir(parents=True, exist_ok=True)
+                clock = time.monotonic();timings = {}
+                def lap(name):
+                    nonlocal clock
+                    timings[name] = round(time.monotonic() - clock, 2);clock = time.monotonic()
                 (work / 'captions.srt').write_text(self.captions(timeline), encoding='utf-8')
-                scenes = timeline['scenes'];done = [0]
+                scenes = timeline['scenes'];done = [0];cached_scenes = [0]
                 workers = asyncio.Semaphore(render_workers())
                 async def one(index):
                     async with workers:
@@ -1207,6 +1286,8 @@ class Production:
                         if not (cached and segment.exists() and await asyncio.to_thread(checksum, segment) == cached):
                             await self.render_scene(job, timeline, media, work, index)
                             job['cache'][str(index)] = await asyncio.to_thread(checksum, segment)
+                        else:
+                            cached_scenes[0] += 1
                         done[0] += 1
                         job.update(progress=round(done[0] / len(scenes) * 75), stage=f"Rendered {done[0]} of {len(scenes)} scenes")
                         self.store.production_update_render(job)
@@ -1217,9 +1298,10 @@ class Production:
                     for task in pending:task.cancel()
                     await asyncio.gather(*pending, return_exceptions=True)
                     raise
+                job['cached_scenes'] = cached_scenes[0];lap('scenes')
                 job.update(stage='Joining scenes', progress=78)
                 self.store.production_update_render(job)
-                listing = await self.assemble(job, timeline, work)
+                listing = await self.assemble(job, timeline, work);lap('joins')
                 job.update(stage='Assembling video and audio', progress=80)
                 self.store.production_update_render(job)
                 audio = ['-protocol_whitelist', 'file,pipe', '-i', str(self.media_path(media[timeline['narration_id']]))] if timeline['narration_id'] else ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo']
@@ -1231,6 +1313,7 @@ class Production:
                     self.store.production_update_render(job)
                     await self.premix(job, timeline, media, work)
                     audio = ['-i', str(work / 'mix.wav')];voice_filter = 'apad'
+                lap('audio_mix')
                 audio_filter = ('loudnorm=I=-22:TP=-2:LRA=9,afade=t=in:d=1,afade=t=out:st=' + str(max(0, timeline['seconds']-2)) + ':d=2,apad') if timeline.get('music') else voice_filter
                 # One continuous encode: no decoder reconfiguration at cuts, and no filter graph that grows with scene count.
                 job.update(stage='Encoding the full program')
@@ -1240,6 +1323,7 @@ class Production:
                                          '-r', '30', '-fps_mode', 'cfr', '-af', audio_filter,
                                          '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', '-t', str(timeline['seconds']),
                                          '-movflags', '+faststart', 'program.mp4'], timeout=max(600, timeline['seconds'] * 3))
+                lap('final_encode')
                 job.update(stage='Validating output', progress=90)
                 self.store.production_update_render(job)
                 output = work / 'program.mp4'
@@ -1252,8 +1336,8 @@ class Production:
                     raise ValueError('The video stream ended early or has an incorrect frame count; audio duration cannot validate the picture.')
                 # Decode every output frame/sample; probing headers alone is insufficient.
                 await self.command(job, ['-loglevel', 'info', '-xerror', '-i', 'program.mp4', '-map', '0:v:0', '-map', '0:a:0',
-                                         '-vf', 'blackdetect=d=1:pix_th=0.005:pic_th=0.995',
-                                         '-af', 'silencedetect=noise=-50dB:d=2', '-f', 'null', '-'], log_name='qc.log')
+                                         '-vf', f'blackdetect=d=1:pix_th=0.005:pic_th=0.995,freezedetect=n=0.001:d={production_report.FREEZE_SECONDS}',
+                                         '-af', 'silencedetect=noise=-50dB:d=2,ebur128=peak=true', '-f', 'null', '-'], log_name='qc.log')
                 qc = (work / 'qc.log').read_text(errors='replace')
                 if re.search(r'black_start:', qc):
                     raise ValueError('The output contains an extended nearly black interval. Inspect the scene assets and qc.log.')
@@ -1267,10 +1351,20 @@ class Production:
                             'music': {'creator': 'Weather Intelligence Studio', 'source': 'Original locally synthesized instrumental pulse; no voice or third-party samples'} if timeline.get('music') else None,
                             'notice': 'Production preview only. Source-linked captions are burned in; footage is explicitly contextual. No local voiceover generated.'}
                 (work / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+                lap('quality_control')
+                report = production_report.build(job, timeline, media, qc, (work / 'captions.srt').read_text(encoding='utf-8'), self.store.advisory, timings)
+                await asyncio.to_thread(packaging.package, work, timeline, report)
+                report['timings_seconds']['packaging'] = round(time.monotonic() - clock, 2)
+                report['packaging'] = json.loads((work / 'metadata.json').read_text())
+                (work / 'report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+                (work / 'report.md').write_text(production_report.markdown(report), encoding='utf-8')
+                job['report'] = {'errors': report['errors'], 'warnings': report['warnings'], 'timings_seconds': report['timings_seconds'],
+                                 'cache': report['cache'], 'checks': report['checks'], 'findings': report['findings'][:30]}
                 job.update(status='succeeded', stage='Validated preview ready', progress=100,
                            validation={**manifest['output'], 'decoded': True, 'black_frame_check': True, 'warnings': warnings, 'audio_mode': timeline['audio_mode'],
                                        'checksums': {kind: await asyncio.to_thread(checksum, work / filename) for kind, filename in
-                                                     [('video', 'program.mp4'), ('subtitles', 'captions.srt'), ('manifest', 'manifest.json')]}})
+                                                     [('video', 'program.mp4'), ('subtitles', 'captions.srt'), ('manifest', 'manifest.json'),
+                                                      ('report', 'report.json'), ('report_md', 'report.md'), ('thumbnail', 'thumbnail.jpg'), ('metadata', 'metadata.json')]}})
                 self.store.production_update_render(job)
         except asyncio.CancelledError:
             job.update(status='cancelled', stage='Cancelled', error='Render stopped; completed scenes can be reused on retry.')

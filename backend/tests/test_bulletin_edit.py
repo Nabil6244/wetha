@@ -78,3 +78,13 @@ def test_footage_runs_vary_instead_of_strictly_alternating():
         elif count:runs.append(count);count=0
     assert max(runs)==2 and all(n<=2 for n in runs)
     assert not flags[0]
+
+
+def test_every_drafted_cut_passes_the_timeline_contract():
+    from app.contracts import ProductionSceneRequest
+    rows=scenes(60)
+    for i,s in enumerate(rows):s['seconds']=[2.6,4.6,5.0,7.3,4.2,9.9][i%6]
+    result=draft({'scenes':rows},assets(),lambda _:SimpleNamespace(event_key='test'))
+    assert any(s['cuts'] for s in result['scenes'])
+    for scene in result['scenes']:
+        ProductionSceneRequest(**scene)  # raises if a cut length is outside the contract

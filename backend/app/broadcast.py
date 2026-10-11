@@ -251,6 +251,7 @@ class Composer:
         self.parameters=parameters
         self.sources=[]
         self.legend=None
+        self.chrome=None
         self.load_asset=load_asset
         bounds=parameters.get('bounds')
         if bounds is None:
@@ -261,7 +262,13 @@ class Composer:
                 else:
                     for child in value: collect(child)
             for f in parameters.get('geojson',{}).get('features',[]): collect(f['geometry']['coordinates'])
-            bounds=[max(-179,min(c[0] for c in coords)-8),max(-80,min(c[1] for c in coords)-6),min(179,max(c[0] for c in coords)+8),min(80,max(c[1] for c in coords)+6)] if coords else [-85,27,-72,38]
+            if coords:
+                # Margin proportional to the story's size: a county warning fills the frame, a hurricane track keeps context.
+                west,east=min(c[0] for c in coords),max(c[0] for c in coords);south,north=min(c[1] for c in coords),max(c[1] for c in coords)
+                dx=max(1.6,(east-west)*.6);dy=max(1.0,(north-south)*.6)
+                bounds=[max(-179,west-dx),max(-80,south-dy),min(179,east+dx),min(80,north+dy)]
+            else:
+                bounds=[-85,27,-72,38]
         self.bounds=fit_bounds(tuple(bounds))
         self.records=parameters.get('records',[])
         if not self.records:
@@ -294,7 +301,10 @@ class Composer:
     def frame(self,t):
         sd=self.direction; p=self.parameters
         z,x,y=camera_pose(sd.camera,t)
-        if self.sources:
+        if p.get('visual_state') in FULL_CARDS or p.get('graphic_style'):
+            # The card covers the whole picture between header and lower third; no map is drawn beneath it.
+            image=Image.new('RGB',SIZE,'#081d2c')
+        elif self.sources:
             i=0 if sd.scene_type=='satellite_wide' else min(len(self.sources)-1,int(t*len(self.sources)))
             src=self.sources[i]
             # Native images are presentation viewports. No pixel-to-lat/lon assumption.
@@ -329,6 +339,18 @@ class Composer:
                 from .map_graphics import geometry
                 geometry(image,p,self.bounds,t)
                 d=ImageDraw.Draw(image)
+            if p.get('visual_state')=='place_focus' and p.get('state_places'):
+                from .geography import draw_places
+                draw_places(image,p['state_places'],self.bounds,t,p.get('place_warning'))
+                d=ImageDraw.Draw(image)
+            if p.get('visual_state')=='county_focus' and p.get('county_shapes'):
+                from .geography import draw_counties
+                draw_counties(image,p['county_shapes'],self.bounds,t,p.get('place_warning'))
+                d=ImageDraw.Draw(image)
+            if p.get('visual_state')=='severe_outlook' and p.get('outlook'):
+                from .spc import draw as draw_outlook
+                draw_outlook(image,p['outlook'],self.bounds,t)
+                d=ImageDraw.Draw(image)
             if self.records and p.get('map_mode') not in ('warnings','radar'):
                 count=max(1,min(len(self.records),1+int(t*len(self.records))))
                 pts=[map_point(r['coordinates'],self.bounds) for r in self.records[:count]]
@@ -341,7 +363,7 @@ class Composer:
                 px,py=map_point(coord,self.bounds);label(d,(px,py),name,26,'#bdd3dc')
                 if name==p.get('focus_label'):
                     r=16+10*abs(math.sin(t*math.pi*2));d.ellipse((px-r,py-r,px+r,py+r),outline='#82efdc',width=4)
-        if not self.sources and sd.scene_type != 'statistics':
+        if not self.sources and sd.scene_type != 'statistics' and not (p.get('visual_state') in FULL_CARDS or p.get('graphic_style')):
             if sd.camera.geographic_target:
                 tx,ty=map_point(sd.camera.geographic_target,self.bounds)
                 u=easing(t,sd.camera.easing);x=.5+(tx/1920-.5)*u;y=.5+(ty/1080-.5)*u
@@ -350,8 +372,10 @@ class Composer:
                 tx,ty=map_point(p['focus_coord'],self.bounds)
                 peak=max(sd.camera.start_zoom,sd.camera.end_zoom);k=(z-1)/(peak-1) if peak>1 else 0
                 x=.5+(tx/1920-.5)*k;y=.5+(ty/1080-.5)*k
-            w,h=1920/z,1080/z;cx=max(w/2,min(1920-w/2,x*1920));cy=max(h/2,min(1080-h/2,y*1080))
-            image=image.crop((int(cx-w/2),int(cy-h/2),int(cx+w/2),int(cy+h/2))).resize(SIZE,Image.Resampling.BILINEAR)
+            if z>1.0005:
+                w,h=1920/z,1080/z;cx=max(w/2,min(1920-w/2,x*1920));cy=max(h/2,min(1080-h/2,y*1080))
+                # Sub-pixel crop box keeps slow moves smooth instead of stepping a whole pixel at a time.
+                image=image.resize(SIZE,Image.Resampling.BILINEAR,box=(cx-w/2,cy-h/2,cx+w/2,cy+h/2))
         d=ImageDraw.Draw(image)
         if sd.scene_type=='statistics' and not p.get('report_graphs'):
             d.rectangle((0,0,1920,1080),fill='#081d2c')
@@ -371,16 +395,23 @@ class Composer:
             from .report_graphs import draw as draw_report_graphs
             draw_report_graphs(image,p['report_graphs'],t)
             d=ImageDraw.Draw(image)
-        d.rectangle((0,0,1920,82),fill='#061724')
-        label(d,(52,27),'WEATHER INTELLIGENCE',25)
-        label(d,(1370,29),('ARCHIVED WARNING' if all(s.historical for s in sd.sources) else 'SOURCE WARNING') if sd.event_id.startswith('urn:') else sd.event_id[:28]+' / SOURCE RECORD',23,'#65e1d1')
-        if p.get('location_label') and not p.get('report_graphs'):
-            label(d,(55,890),p['location_label'][:95],26,'#82efdc')
-        # A narrow lower third leaves imagery dominant; full prose remains in the SRT.
-        d.rectangle((0,970,1920,1080),fill='#061724')
-        label(d,(55,988),sd.headline,34)
-        source=p.get('credit','NOAA / NHC · Natural Earth cartography')
-        label(d,(55,1040),source[:140],21,'#a8c4d0')
+        # Header, location and lower third do not change within a shot: drawn once, then pasted.
+        if self.chrome is None:
+            top=Image.new('RGB',(1920,82),'#061724');td=ImageDraw.Draw(top)
+            label(td,(52,27),'WEATHER INTELLIGENCE',25)
+            label(td,(1370,29),('ARCHIVED WARNING' if all(s.historical for s in sd.sources) else 'SOURCE WARNING') if sd.event_id.startswith('urn:') else sd.event_id[:28]+' / SOURCE RECORD',23,'#65e1d1')
+            # A narrow lower third leaves imagery dominant; full prose remains in the SRT.
+            bottom=Image.new('RGB',(1920,110),'#061724');bd=ImageDraw.Draw(bottom)
+            label(bd,(55,18),sd.headline,34)
+            label(bd,(55,70),p.get('credit','NOAA / NHC · Natural Earth cartography')[:140],21,'#a8c4d0')
+            place=None
+            if p.get('location_label') and not p.get('report_graphs'):
+                place=Image.new('RGBA',(1500,40),(0,0,0,0));label(ImageDraw.Draw(place),(0,0),p['location_label'][:95],26,'#82efdc')
+            self.chrome=(top,bottom,place)
+        top,bottom,place=self.chrome
+        image.paste(top,(0,0))
+        if place is not None:image.paste(place,(55,890),place)
+        image.paste(bottom,(0,970))
         if self.sources and p.get('map_observations') and sd.scene_type=='satellite_timelapse':
             stamp=p['map_observations'][i]['observed_at']
             d.rectangle((1170,95,1880,164),fill='#061724')
@@ -423,6 +454,7 @@ def encoder_args(preference='software'):
     return ['-c:v','libx264','-preset','veryfast','-crf','20']
 
 
+FULL_CARDS = {'stat_card', 'quote_card', 'warning_card'}
 TRANSITION_FRAMES = 10  # A third of a second; the shot keeps its exact duration.
 
 

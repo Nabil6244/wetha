@@ -20,7 +20,7 @@ from .editorial import evaluate, edited, attest, legacy_document
 from . import polished
 from .alignment import AlignmentJobs
 from .footage_expansion import FootageExpansion
-from .contracts import FootageExpansionRequest
+from .contracts import FootageExpansionRequest, AutoProductionRequest
 from .contracts import PolishedRequest, SourceMapRequest, AlignmentRequest
 from .models import model_status
 from .fixtures import training_advisories
@@ -51,11 +51,14 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         app.state.production.alignment_jobs = app.state.alignment
         app.state.discovery = MediaDiscovery(app.state.production, discovery_transport)
         app.state.footage_expansion = FootageExpansion(app.state.discovery)
+        from .orchestrator import Orchestrator
+        app.state.orchestrator = Orchestrator(store, app.state.production, app.state.alignment, app.state.footage_expansion, prepare_production, app.state.visuals)
         collector.start()
         logger.info(json.dumps({"event":"backend_ready", "database":str(store.path)}))
         try:
             yield
         finally:
+            await app.state.orchestrator.close()
             await app.state.production.close()
             await app.state.footage_expansion.close()
             await app.state.discovery.close()
@@ -262,6 +265,47 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
     @app.get('/api/production/alignment/{identity}')
     def alignment_status(identity: str):
         return app.state.alignment.get(identity)
+
+    @app.post('/api/visuals/spc-outlook')
+    async def collect_spc_outlook(day: int = 1):
+        from . import spc
+        if day not in spc.URLS:
+            raise ValueError('SPC categorical outlooks are available for days 1-3.')
+        identity = await spc.collect(store, app.state.visuals.client, day)
+        return {'id': identity, **next(a['metadata'] for a in store.visual_assets('spc_outlook') if a['id'] == identity)}
+
+    @app.post('/api/production/storyboard')
+    async def production_storyboard(body: TimelineRequest):
+        timeline = app.state.production.create_timeline(body, persist=False)
+        result = await asyncio.to_thread(app.state.production.storyboard, timeline)
+        return {'id': result['id'], 'metrics': result['metrics'], 'shots': result['shots']}
+
+    @app.get('/api/production/storyboards/{identity}/{kind}')
+    def production_storyboard_file(identity: str, kind: str):
+        types = {'sheet': 'image/jpeg', 'preview': 'video/mp4', 'json': 'application/json'}
+        if kind not in types:
+            raise KeyError(kind)
+        return FileResponse(app.state.production.storyboard_path(identity, kind), media_type=types[kind])
+
+    @app.post('/api/production/auto')
+    async def start_auto_production(body: AutoProductionRequest):
+        return app.state.orchestrator.start(body)
+
+    @app.get('/api/production/auto')
+    def list_auto_productions():
+        return app.state.orchestrator.list()
+
+    @app.get('/api/production/auto/{identity}')
+    def auto_production_status(identity: str):
+        return app.state.orchestrator.get(identity)
+
+    @app.post('/api/production/auto/{identity}/resume')
+    async def resume_auto_production(identity: str):
+        return app.state.orchestrator.resume(identity)
+
+    @app.post('/api/production/auto/{identity}/cancel')
+    async def cancel_auto_production(identity: str):
+        return await app.state.orchestrator.cancel(identity)
 
     @app.get('/api/production/footage-coverage')
     def footage_coverage(plan_id: str | None = None):
@@ -503,15 +547,19 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         return app.state.production.check_timeline(body)
 
     @app.post('/api/production/prepare')
-    def prepare_production(body: TimelineRequest):
-        """One local preparation step; source audit and alignment are revision bound."""
+    def prepare_production(body: TimelineRequest, use_alignment: bool = True):
+        """One local preparation step; source audit and alignment are revision bound.
+
+        use_alignment=False keeps the supplied scene timing (the estimated timing fallback); the
+        timeline still requires it to match the measured voiceover duration."""
         import copy
         from .bulletin_edit import draft
         production=app.state.production
         plan=store.visual_plan(body.plan_id)
         production.validate_plan(plan)
         payload=body.model_dump()
-        if body.narration_id:
+        job=None
+        if body.narration_id and use_alignment:
             jobs=list(app.state.alignment.jobs.values())
             for path in app.state.alignment.directory.glob('*.json'):
                 try:jobs.append(app.state.alignment.get(path.stem))
@@ -526,7 +574,7 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
             timed={s['id']:s for s in job['result']['scenes']}
             payload['scenes']=[{**s,'seconds':timed[s['id']]['seconds']} for s in payload['scenes']]
             payload.update(alignment_id=job['id'],narration_verified=True,music=False,template=None)
-        if body.narration_id and payload['presentation']=='broadcast' and not plan.get('automatic_shots') and not any(s.get('media_id') or s.get('cuts') for s in payload['scenes']):
+        if job and payload['presentation']=='broadcast' and not plan.get('automatic_shots') and not any(s.get('media_id') or s.get('cuts') for s in payload['scenes']):
             from .automatic_edit import subdivide
             plan,derived,edits=subdivide(plan,job)
             from .contracts import MAX_VISUAL_SCENES
@@ -589,7 +637,8 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
 
     @app.get('/api/production/renders/{identity}/{kind}')
     def export_production(identity: str, kind: str, download: bool = False):
-        types = {'video': 'video/mp4', 'subtitles': 'application/x-subrip', 'manifest': 'application/json'}
+        types = {'video': 'video/mp4', 'subtitles': 'application/x-subrip', 'manifest': 'application/json', 'report': 'application/json',
+                 'report_md': 'text/markdown; charset=utf-8', 'thumbnail': 'image/jpeg', 'metadata': 'application/json'}
         if kind not in types:
             raise KeyError(kind)
         path = app.state.production.output_path(identity, kind)

@@ -33,6 +33,10 @@ The initial channel is **US Extreme Weather**. No paid API or existing Semantic 
 
 No draft or rendered preview is broadcast eligible. Local TTS is excluded; OBS automation is a later phase. Timelines can run up to two hours. Satellite/radar views require successful collection and explicitly show unavailable observations or source failures. The synthetic training dataset is never presented as real observations.
 
+## Automatic production
+
+Upload the final script and voiceover, then select **Make final video**. A saved, resumable job aligns the voiceover, plans visuals and footage from the narration's meaning, renders in parallel, runs measured quality checks, and returns the MP4 with a production report, a thumbnail, and a title and description. Nothing is published. See [Production engine](docs/PRODUCTION_ENGINE.md) for stages, providers, configuration and benchmarks.
+
 ## Develop
 
 Use Node **24** and Python **3.12**. Commands below run from the repository root. The Python environment is isolated and dependencies are pinned with artifact hashes.

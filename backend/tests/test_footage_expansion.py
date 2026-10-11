@@ -11,8 +11,12 @@ def plan():
 def test_search_needs_use_each_story_location_not_only_primary_advisory():
     store=SimpleNamespace(advisory=lambda _:SimpleNamespace(area=''))
     rows=needs(plan(),store)
-    assert {'Florida rain','Florida flood','Alabama storm','Alabama wind'}=={r['query'] for r in rows}
+    located={r['query'] for r in rows if r['regions']}
+    assert {'Florida rain','Florida flood','Alabama storm','Alabama wind'}==located
     assert all(r['scene_ids']==['fl'] for r in rows if 'Florida' in r['query'])
+    # Plain shot descriptions are searched too, without claiming a location.
+    plain={r['query']:r for r in rows if not r['regions']}
+    assert {'flooded street','heavy rain street'}<=set(plain) and plain['flooded street']['scene_ids']==['fl']
 
 
 def test_area_codes_are_unique_and_marine_distances_are_not_states():

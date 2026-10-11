@@ -45,6 +45,10 @@ class Store:
             conn.execute("UPDATE feeds SET status='failed', last_error='Collection interrupted by backend restart', consecutive_failures=consecutive_failures+1 WHERE status='collecting'")
             conn.execute("UPDATE newsroom_runs SET status='failed', error='Interrupted by backend restart', updated_at=? WHERE status='running'", (now(),))
             conn.execute("UPDATE agent_steps SET status='failed', error='Interrupted by backend restart', finished_at=? WHERE status='running'", (now(),))
+            for row in conn.execute("SELECT id, document FROM production_jobs WHERE status IN ('queued', 'running')").fetchall():
+                document = json.loads(row['document'])
+                document.update(status='interrupted', error='Interrupted by application restart. Resume to continue; completed alignment and scenes are reused.')
+                conn.execute('UPDATE production_jobs SET status=?, document=?, updated_at=? WHERE id=?', ('interrupted', json.dumps(document), now(), row['id']))
             for row in conn.execute("SELECT id, document FROM production_renders WHERE status IN ('queued', 'running')").fetchall():
                 document = json.loads(row['document'])
                 document.update(status='failed', error='Interrupted by backend restart; retry to reuse completed scenes.')
@@ -278,7 +282,7 @@ class Store:
 
     def visual_assets(self, kind: str | None = None) -> list[dict]:
         with self.connection() as conn:
-            rows = conn.execute('SELECT id, kind, source_url, observed_at, content_type, checksum, document, fetched_at FROM visual_assets WHERE (? IS NULL OR kind=?) ORDER BY observed_at DESC, id LIMIT 120', (kind, kind))
+            rows = conn.execute('SELECT id, kind, source_url, observed_at, content_type, checksum, document, fetched_at FROM visual_assets WHERE (? IS NULL OR kind=?) ORDER BY observed_at DESC, id LIMIT 500', (kind, kind))
             return [{**dict(row), 'metadata':json.loads(row['document'])} for row in rows]
 
     def visual_asset(self, identity: str) -> dict:
@@ -297,7 +301,8 @@ class Store:
             if old and old['checksum'] != digest:
                 raise ValueError('Dated visual evidence changed at the same URL; preserving the original cached asset.')
             conn.execute('INSERT OR IGNORE INTO visual_assets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', (identity, document['kind'], document['source_url'], document['observed_at'], document['content_type'], body, digest, json.dumps(document['metadata']), now()))
-            # Bound retained media to 120 assets and 256 MB, preserving any plan-referenced assets.
+            # Bound retained media to 500 assets and 256 MB, preserving any plan-referenced assets.
+            # (Multi-story bulletins cache zone outlines plus radar and satellite frames per story.)
             pinned = set()
             for row in conn.execute('SELECT document FROM visual_plans'):
                 pinned.update(json.loads(row['document']).get('asset_ids', []))
@@ -305,7 +310,7 @@ class Store:
             total = 0
             for index, row in enumerate(rows):
                 total += row['bytes']
-                if (index >= 120 or total > 256_000_000) and row['id'] not in pinned:
+                if (index >= 500 or total > 256_000_000) and row['id'] not in pinned:
                     conn.execute('DELETE FROM visual_assets WHERE id=?', (row['id'],))
         return identity
 
@@ -339,7 +344,7 @@ class Store:
 
     @staticmethod
     def _production_table(kind):
-        return {'media': 'production_media', 'timelines': 'production_timelines', 'renders': 'production_renders'}[kind]
+        return {'media': 'production_media', 'timelines': 'production_timelines', 'renders': 'production_renders', 'jobs': 'production_jobs'}[kind]
 
     def production_get(self, kind: str, identity: str) -> dict:
         table = self._production_table(kind)
@@ -368,8 +373,20 @@ class Store:
                 conn.execute('INSERT INTO production_timelines(id, document, created_at, plan_id) VALUES (?, ?, ?, ?)', (*values, document['plan_id']))
             elif kind == 'renders':
                 conn.execute('INSERT INTO production_renders(id, document, created_at, timeline_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?)', (*values, document['timeline_id'], document['status'], now()))
+            elif kind == 'jobs':
+                conn.execute('INSERT INTO production_jobs(id, document, created_at, status, updated_at) VALUES (?, ?, ?, ?, ?)', (*values, document['status'], now()))
             else:
                 raise KeyError(kind)
+
+    def production_update_media(self, document: dict):
+        """Replace a library record in place, e.g. after shot analysis. The checksum never changes."""
+        with self.connection() as conn:
+            if not conn.execute('UPDATE production_media SET document=? WHERE id=? AND checksum=?', (json.dumps(document), document['id'], document['checksum'])).rowcount:
+                raise KeyError(document['id'])
+
+    def production_update_job(self, document: dict):
+        with self.connection() as conn:
+            conn.execute('UPDATE production_jobs SET status=?, document=?, updated_at=? WHERE id=?', (document['status'], json.dumps(document), now(), document['id']))
 
     def production_update_render(self, document: dict):
         with self.connection() as conn:

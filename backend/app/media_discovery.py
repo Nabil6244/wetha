@@ -97,6 +97,7 @@ class MediaDiscovery:
         self.client = httpx.AsyncClient(transport=transport, timeout=20, follow_redirects=False,
                                       headers={'User-Agent': 'WeatherIntelligenceStudio/0.5 (local media discovery)'})
         self.cache = {}
+        self.stock_cache = {}
         self.lock = asyncio.Lock()
         self.seeds = json.loads((Path(__file__).parent / 'data/discovery-seeds.json').read_text())['assets']
 
@@ -187,6 +188,143 @@ class MediaDiscovery:
             return rows, []
         except (httpx.HTTPError,ValueError,TypeError,KeyError):return [], ['NASA archive search is unavailable.']
 
+    async def archive(self, body):
+        """Internet Archive video items under CC BY or public-domain terms. No key. Dated material is archival.
+
+        Only exact CC BY licence URLs and public-domain marks/dedications are accepted (no share-alike,
+        non-commercial or no-derivatives terms). A weather word must appear in the subject or description,
+        not only the title, which keeps out people and places that merely share a name."""
+        if body.kind == 'image' or body.provider not in ('all', 'stock'):
+            return [], []
+        query = re.sub(r'[^\w\s-]', ' ', body.query).strip()
+        if not query:
+            return [], []
+        licences = ['licenseurl:*publicdomain*'] + [f'licenseurl:"{scheme}://creativecommons.org/licenses/by/{v}/"' for scheme in ('http', 'https') for v in ('4.0', '3.0')]
+        terms = ' '.join(query.split()[:4])
+        rows, warnings = [], []
+        try:
+            docs = {}
+            for licence in (licences[0], ' OR '.join(licences[1:])):
+                response = await self.client.get('https://archive.org/advancedsearch.php', params={
+                    'q': f'(title:({terms}) OR subject:({terms})) AND mediatype:movies AND ({licence})',
+                    'fl[]': ['identifier', 'title', 'licenseurl', 'creator', 'date', 'subject', 'description'], 'rows': 12, 'output': 'json'})
+                response.raise_for_status()
+                for doc in response.json().get('response', {}).get('docs', []):
+                    docs.setdefault(doc['identifier'], doc)
+            for doc in list(docs.values())[:10]:
+                licence = doc.get('licenseurl', '')
+                if not re.search(r'creativecommons\.org/(licenses/by/[34]\.0/?$|publicdomain/(zero|mark)/|licenses/publicdomain)', licence):
+                    continue
+                subject = doc.get('subject', '');subject = ' '.join(subject) if isinstance(subject, list) else subject
+                description = doc.get('description', '');description = ' '.join(description) if isinstance(description, list) else description
+                if not topics(subject + ' ' + plain(description)[:2000]):
+                    continue
+                meta = await self.client.get(f"https://archive.org/metadata/{quote(doc['identifier'], safe='')}")
+                meta.raise_for_status();data = meta.json()
+                server, folder = data.get('d1', ''), data.get('dir', '')
+                if not re.fullmatch(r'[a-z0-9]+\.us\.archive\.org', server or ''):
+                    continue
+                files = [f for f in data.get('files', []) if f.get('name', '').endswith('.mp4') and 0 < int(f.get('size') or 0) <= MAX_DOWNLOAD]
+                if not files:
+                    continue
+                best = max(files, key=lambda f: (int(f.get('height') or 0), int(f.get('size') or 0)))
+                page = f"https://archive.org/details/{doc['identifier']}"
+                public = 'publicdomain' in licence
+                creator = doc.get('creator', '');creator = ', '.join(creator) if isinstance(creator, list) else creator
+                title = plain(doc.get('title', 'Internet Archive video'))[:150]
+                rows.append(self.remember({'title': title, 'filename': re.sub(r'[^\w.-]', '_', doc['identifier'])[:110] + '.mp4', 'kind': 'video',
+                    'download_url': f"https://{server}{folder}/{quote(best['name'])}", 'catalogue_url': page, 'source': page,
+                    'source_provider': 'stock', 'provider': 'archive', 'context': 'archival',
+                    'attribution': (creator or 'Internet Archive contributor') + ' / Internet Archive',
+                    'license': ('Public domain ' if public else 'CC BY ') + licence, 'reuse_basis': 'public_domain' if public else 'cc_by',
+                    'reuse_evidence': page + ' · Internet Archive item licence: ' + licence,
+                    'description': plain(description)[:1000], 'declared_date': (doc.get('date') or '')[:10] or None,
+                    'tags': sorted(topics(title + ' ' + subject + ' ' + plain(description)[:2000])), 'event_id': None, 'location': None,
+                    'captured_at': None, 'width': int(best.get('width') or 0) or None, 'height': int(best.get('height') or 0) or None,
+                    'bytes': int(best.get('size') or 0) or None, 'expected_sha1': best.get('sha1'), 'thumbnail_url': None, 'preferred_clip_seconds': 3.5}))
+            return rows, warnings
+        except (httpx.HTTPError, ValueError, TypeError, KeyError):
+            return rows, ['Internet Archive search is unavailable right now.']
+
+    async def stock(self, body):
+        """Pexels and Pixabay video APIs. Each needs its own free key; without one the provider is skipped.
+
+        Both licences allow free use without required attribution, but forbid implying endorsement, reselling
+        unaltered files, and showing identifiable people in a bad light. Results are illustrative only."""
+        import os
+        if body.kind == 'image' or body.provider not in ('all', 'stock'):
+            return [], []
+        jobs = []
+        if os.environ.get('PEXELS_API_KEY'):
+            jobs.append(self.pexels(body.query, os.environ['PEXELS_API_KEY']))
+        if os.environ.get('PIXABAY_API_KEY'):
+            jobs.append(self.pixabay(body.query, os.environ['PIXABAY_API_KEY']))
+        rows, warnings = [], []
+        for found, problems in await asyncio.gather(*jobs):
+            rows += found;warnings += problems
+        return rows, warnings
+
+    def stock_cached(self, key):
+        # Pixabay asks for 24-hour caching of API results; the same window keeps Pexels within its hourly limit.
+        cached = self.stock_cache.get(key)
+        return cached[1] if cached and time.monotonic() - cached[0] < 86400 else None
+
+    async def pexels(self, query, key):
+        cached = self.stock_cached(('pexels', query.casefold()))
+        if cached is not None:
+            return cached, []
+        try:
+            response = await self.client.get('https://api.pexels.com/videos/search', params={'query': query, 'per_page': 15, 'orientation': 'landscape'},
+                                             headers={'Authorization': key})
+            response.raise_for_status()
+            if len(response.content) > MAX_RESPONSE:raise ValueError('Pexels response exceeds size limit.')
+            rows = []
+            for video in response.json().get('videos', []):
+                files = [f for f in video.get('video_files', []) if f.get('file_type') == 'video/mp4' and (f.get('width') or 0) >= 1280]
+                if not files:continue
+                best = min(files, key=lambda f: abs((f.get('width') or 0) - 1920))
+                if not safe_url(best.get('link', ''), {'videos.pexels.com'}):continue
+                page = video.get('url', '');slug = urlsplit(page).path.strip('/').split('/')[-1]
+                title = ' '.join(w for w in slug.split('-') if not w.isdigit()).capitalize() or 'Pexels video'
+                author = (video.get('user') or {}).get('name') or 'Pexels contributor'
+                rows.append(self.remember({'title': title, 'filename': f"pexels-{video['id']}.mp4", 'kind': 'video', 'download_url': best['link'],
+                    'catalogue_url': page, 'source': page, 'source_provider': 'stock', 'provider': 'pexels', 'context': 'illustrative',
+                    'attribution': author + ' / Pexels', 'license': 'Pexels License https://www.pexels.com/license/',
+                    'reuse_basis': 'stock_license', 'reuse_evidence': page + ' · Pexels License: free to use, attribution appreciated; no endorsement, no resale of unaltered copies.',
+                    'description': title, 'declared_date': None, 'tags': sorted(topics(title)), 'event_id': None, 'location': None, 'captured_at': None,
+                    'width': best.get('width'), 'height': best.get('height'), 'bytes': None, 'seconds': video.get('duration'),
+                    'expected_sha1': None, 'thumbnail_url': video.get('image'), 'preferred_clip_seconds': 3.5}))
+            self.stock_cache[('pexels', query.casefold())] = (time.monotonic(), rows)
+            return rows, []
+        except (httpx.HTTPError, ValueError, TypeError, KeyError):
+            return [], ['Pexels search is unavailable; check PEXELS_API_KEY and the hourly request limit.']
+
+    async def pixabay(self, query, key):
+        cached = self.stock_cached(('pixabay', query.casefold()))
+        if cached is not None:
+            return cached, []
+        try:
+            response = await self.client.get('https://pixabay.com/api/videos/', params={'key': key, 'q': query[:100], 'per_page': 15, 'safesearch': 'true'})
+            response.raise_for_status()
+            if len(response.content) > MAX_RESPONSE:raise ValueError('Pixabay response exceeds size limit.')
+            rows = []
+            for hit in response.json().get('hits', []):
+                sizes = hit.get('videos', {})
+                best = next((sizes[k] for k in ('large', 'medium') if sizes.get(k, {}).get('url') and (sizes[k].get('width') or 0) >= 1280), None)
+                if not best or not safe_url(best['url'], {'cdn.pixabay.com'}):continue
+                page = hit.get('pageURL', '');tags = hit.get('tags', '')
+                rows.append(self.remember({'title': tags.title() or 'Pixabay video', 'filename': f"pixabay-{hit['id']}.mp4", 'kind': 'video', 'download_url': best['url'],
+                    'catalogue_url': page, 'source': page, 'source_provider': 'stock', 'provider': 'pixabay', 'context': 'illustrative',
+                    'attribution': (hit.get('user') or 'Pixabay contributor') + ' / Pixabay', 'license': 'Pixabay Content License https://pixabay.com/service/license-summary/',
+                    'reuse_basis': 'stock_license', 'reuse_evidence': page + ' · Pixabay Content License: free to use, no attribution required; no resale of unaltered copies, no endorsement.',
+                    'description': tags, 'declared_date': None, 'tags': sorted(topics(tags)), 'event_id': None, 'location': None, 'captured_at': None,
+                    'width': best.get('width'), 'height': best.get('height'), 'bytes': best.get('size'), 'seconds': hit.get('duration'),
+                    'expected_sha1': None, 'thumbnail_url': best.get('thumbnail'), 'preferred_clip_seconds': 3.5}))
+            self.stock_cache[('pixabay', query.casefold())] = (time.monotonic(), rows)
+            return rows, []
+        except (httpx.HTTPError, ValueError, TypeError, KeyError):
+            return [], ['Pixabay search is unavailable; check PIXABAY_API_KEY and the per-minute request limit.']
+
     async def search(self, body):
         key = (body.query.strip().casefold(), body.provider, body.kind)
         reviewed = self.reviewed()
@@ -205,7 +343,8 @@ class MediaDiscovery:
                 if cached and time.monotonic() - cached[0] < (30 if cached[2] else 600):
                     found, warnings = cached[1:]
                 else:
-                    found, warnings = await self.commons(body)
+                    (found, warnings), (stocked, stock_warnings), (archived, archive_warnings) = await asyncio.gather(self.commons(body), self.stock(body), self.archive(body))
+                    found = found + stocked + archived;warnings = warnings + stock_warnings + archive_warnings
                     if not found and warnings and body.provider=='all':
                         alternate, alternate_warnings=await self.nasa(body)
                         found+=alternate;warnings+=alternate_warnings
@@ -252,7 +391,8 @@ class MediaDiscovery:
             raise ValueError('Search for this candidate again before importing.')
         candidate = json.loads(path.read_text())
         url = candidate['download_url']
-        if not safe_url(url, {'videos.pexels.com', 'upload.wikimedia.org', 'images-assets.nasa.gov'}):
+        archive_host = re.fullmatch(r'https://[a-z0-9]+\.us\.archive\.org/.+', url) and safe_url(url, {urlsplit(url).hostname})
+        if not (archive_host or safe_url(url, {'videos.pexels.com', 'cdn.pixabay.com', 'upload.wikimedia.org', 'images-assets.nasa.gov'})):
             raise ValueError('This source does not have an approved media download URL.')
         # Reviewed bytes already in the library never need another download.
         existing = next((m for m in self.production.store.production_list('media') if m['checksum'] == candidate.get('checksum')), None)

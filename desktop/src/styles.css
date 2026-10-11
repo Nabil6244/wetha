@@ -59,3 +59,14 @@
 .bulletin-builder .newsroom-topic input[type=checkbox]{width:16px;flex:0 0 16px;height:16px}.bulletin-builder .newsroom-topic>span{flex:1}.bulletin-builder .production-actions{flex-wrap:wrap}
 
 .production-export-status{margin-top:18px;padding:18px;border:1px solid #315356;border-radius:8px;background:#12272b}.production-export-status p{line-height:1.8;margin:10px 0}.production-export-status progress{width:100%;accent-color:var(--teal)}.production-export-status .button{margin-top:10px}
+
+.auto-stages { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
+.auto-stage { display: flex; align-items: center; gap: 8px; }
+.auto-stage.pending { opacity: .6; }
+.auto-report { border-top: 1px solid rgba(255,255,255,.08); padding-top: 10px; }
+
+.library-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.library-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.library-table th, .library-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.library-table tr.gap-missing td { color: #ff9e8a; }
+.library-table tr.gap-thin td { color: #ffd089; }

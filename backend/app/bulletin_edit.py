@@ -27,7 +27,8 @@ def draft(timeline, media, advisory_lookup, unavailable=()):
             if frames<MIN_SHOT:
                 short_beats+=1
             else:
-                choices=media_selection.rank(scene,media,advisory_lookup(scene['parameters']['source_advisory_id']),set(unavailable)|reserved,limit=None)
+                choices=media_selection.rank(scene,media,advisory_lookup(scene['parameters']['source_advisory_id']),set(unavailable)|reserved,limit=None,
+                                             allow_unverified=timeline.get('unverified_location_footage',False))
                 proposed=[];proposed_offsets=dict(offsets);proposed_ends=dict(last_end);proposed_uses=dict(uses)
                 for length in lengths:
                     seconds=length/30

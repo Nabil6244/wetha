@@ -1,6 +1,8 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {Clapperboard, Download, FileCheck, FolderOpen, LoaderCircle, Play, Plus, RefreshCw, Save, Upload, X} from 'lucide-react';
 import {api} from '../api';
+import AutoProduction, {AutoJob} from './AutoProduction';
+import FootageLibrary from './FootageLibrary';
 import type {Dashboard} from '../contracts';
 import MediaCatalogEditor, {type MediaCatalog} from './MediaCatalogEditor';
 import MediaDiscovery from './MediaDiscovery';
@@ -73,6 +75,9 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
   const [timelineId, setTimelineId] = useState('');
   const [dirty, setDirty] = useState(false);
   const [previewId, setPreviewId] = useState('');
+  const [autoJob, setAutoJob] = useState<AutoJob | null>(null);
+  const [findFootage, setFindFootage] = useState(false);
+  const announced = useRef('');
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
   const [requestedTemplate, setRequestedTemplate] = useState<Template>('short_30');
@@ -211,26 +216,37 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
   }
 
   async function makeFinalVideo() {
-    await work('Checking and preparing your video', async () => {
+    await work('Starting automatic production', async () => {
       if(unsavedNarration)throw new Error('Save your pasted script using Save script & prepare automatically above.');
-      const prepared=await api<{status:string;alignment?:Alignment;plan?:Plan;body:typeof timelineBody;check:{ready:boolean;issues:VisualIssue[];visual_coverage:VisualCoverage};mixed_edit?:{coverage:{footage_clips:number;footage_seconds:number}}}>('/production/prepare',timelineBody);
-      if(prepared.status==='aligning'&&prepared.alignment){setAlignment(prepared.alignment);setAutoFinish(true);setNotice('Matching spoken timing locally. Video preparation will continue automatically when alignment finishes.');return;}
-      setAutoFinish(false);
-      if(prepared.alignment)setAlignment(prepared.alignment);
-      const checked=prepared.check;
-      if(prepared.plan){setPlans(old=>[prepared.plan!,...old.filter(p=>p.id!==prepared.plan!.id)]);setPlanId(prepared.plan.id);}
-      setScenes(prepared.body.scenes);setNarrationVerified(prepared.body.narration_verified);
-      setCheck({...checked,key:JSON.stringify(prepared.body)});
-      if(!checked.ready)throw new Error(checked.issues.map(i=>i.message).join(' '));
-      const timeline = await api<Timeline>('/production/timelines',prepared.body);
-      setState(old => old ? {...old, timelines: [timeline, ...old.timelines.filter(t => t.id !== timeline.id)]} : old);
-      setTimelineId(timeline.id); setDirty(false);
-      const render = await api<Render>('/production/renders', {timeline_id: timeline.id});
-      setState(old=>old ? {...old,renders:[render,...old.renders.filter(r=>r.id!==render.id)]} : old);
-      setPreviewId(render.id);
-      setNotice('Source checks, speech timing, graphs and available footage were prepared automatically. Your video is rendering locally. When it is ready, preview it and download the MP4 below.');
+      if(!narrationId)throw new Error('Upload the voiceover for this script first.');
+      // Everything after script and voiceover runs as one saved, resumable job on the backend.
+      const job=await api<AutoJob>('/production/auto',{plan_id:planId,narration_id:narrationId,title:title.trim().length>=2?title:'Weather update',narration_verified:narrationVerified,find_footage:findFootage,music_bed:musicBed,scenes});
+      setAutoJob(job);
+      setNotice('Automatic production started. It aligns the voiceover, plans visuals and footage, renders and checks the video. You can keep working.');
     });
   }
+
+  async function autoAction(action:'resume'|'cancel'){
+    if(!autoJob)return;
+    await work(action==='resume'?'Resuming production':'Cancelling production',async()=>{setAutoJob(await api<AutoJob>(`/production/auto/${autoJob.id}/${action}`,{}));});
+  }
+
+  useEffect(()=>{
+    if(!autoJob||!['queued','running'].includes(autoJob.status))return;
+    const timer=window.setInterval(()=>{void api<AutoJob>(`/production/auto/${autoJob.id}`).then(job=>{
+      setAutoJob(job);
+      if(job.render_id&&announced.current!==job.id){
+        announced.current=job.id;
+        if(job.timeline_id){setTimelineId(job.timeline_id);setDirty(false);}
+        setPreviewId(job.render_id);void load();
+        setNotice('Source checks, speech timing, graphs and available footage were prepared automatically. Your video is rendering locally. When it is ready, preview it and download the MP4 below.');
+      }
+      if(job.status==='succeeded'&&job.render_id){setPreviewId(job.render_id);void load();setNotice('Your finished video is ready. Preview it and download the MP4 below; the production report lists anything to review.');}
+    }).catch(()=>{/* The next poll retries. */});},1500);
+    return ()=>window.clearInterval(timer);
+  },[autoJob?.id,autoJob?.status]);
+
+  useEffect(()=>{void api<AutoJob[]>('/production/auto').then(jobs=>{const latest=jobs.find(j=>j.status!=='succeeded');if(latest)setAutoJob(latest);}).catch(()=>{/* Older backends have no automatic jobs. */});},[]);
 
   useEffect(()=>{
     if(!autoFinish||busy)return;
@@ -295,6 +311,8 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
       <details><summary>Review available footage ({state.media.filter(m=>m.kind==='video').length} recordings)</summary><p className="muted">Preview new recordings, check their source and save capture-location evidence here. The mixed edit can use reviewed clips that match each scene.</p>{state.media.filter(m=>m.kind==='video').map(media=><details key={media.id}><summary>{media.name} · {((media.seconds??0)/60).toFixed(1)} minutes</summary><video controls preload="none" style={{width:'100%',maxHeight:320}} src={`/api/production/media/${media.id}/file`}/><p>{media.context} · {media.license}</p><a href={media.source} target="_blank" rel="noreferrer">Review original source</a><MediaCatalogEditor regions={state.regions} id={media.id} name={media.name} kind={media.kind} catalog={media.catalog} busy={!!busy} save={(id,catalog)=>{void work('Saving footage location evidence',async()=>{const response=await fetch(`/api/production/media/${id}/catalog`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(catalog)});if(!response.ok){const result=await response.json();throw new Error(typeof result.detail==='string'?result.detail:'Unable to save location evidence');}});}}/></details>)}</details>
       <details open={!!footageSearch}><summary>Find &amp; add footage in this tab</summary><MediaDiscovery requestedSearch={footageSearch} regions={state.regions} plans={plans} scriptNames={Object.fromEntries(data.scripts.map(s=>[s.id,s.title]))} imported={load}/></details>
       <div className="production-actions"><button className="button secondary" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}>{advanced ? 'Hide editing controls' : 'Edit visuals & timing'}</button><button className="button primary" disabled={!!busy || rendering || !scenes.length || plan.superseded_script_revision || !state.runtime.ffmpeg || !state.runtime.ffprobe} onClick={() => {void makeFinalVideo();}}>{rendering ? <LoaderCircle size={16} className="spin"/> : <Play size={16}/>} {rendering ? 'Rendering video…' : 'Make final video'}</button></div>
+      <label className="production-check"><input type="checkbox" checked={findFootage} onChange={e=>setFindFootage(e.target.checked)}/>Search for new licensed footage where the library has gaps (Wikimedia, NASA, and Pexels/Pixabay when their keys are set)</label>
+      {autoJob && <AutoProduction job={autoJob} busy={!!busy} onResume={()=>{void autoAction('resume');}} onCancel={()=>{void autoAction('cancel');}}/>}
       {activeRender&&<div className="production-export-status" role="status" aria-label="Export progress"><strong>{activeRender.snapshot.title} · {activeRender.status==='queued'?'Export queued':'Export in progress'}</strong><p>{activeRender.stage} · {activeRender.progress}%</p><progress max={100} value={activeRender.progress}/><p>This runs locally. The export button stays disabled until rendering finishes.</p><a className="button secondary" href="#production-results">View render progress</a></div>}
       {!activeRender&&latestRender?.status==='succeeded'&&<div className="production-export-status" role="status"><strong>Your video is ready.</strong><a className="button primary" href={`/api/production/renders/${latestRender.id}/video?download=true`} download><Download size={15}/>Download final MP4</a></div>}
       {!activeRender&&latestRender?.status==='failed'&&<div className="production-export-status" role="alert"><strong>Export failed</strong><p>{latestRender.error}</p><a className="button secondary" href="#production-results">View export details</a></div>}
@@ -316,6 +334,7 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
     </details>
     {(!state.runtime.ffmpeg || !state.runtime.ffprobe) && <div role="alert" className="message error">Install FFmpeg and FFprobe to import media and render video.</div>}
     {page === 'Media Library' ? <>
+      <FootageLibrary plans={plans}/>
       <MediaDiscovery regions={state.regions} plans={plans} scriptNames={Object.fromEntries(data.scripts.map(s => [s.id, s.title]))} imported={load}/>
       <section className="panel"><div className="panel-header"><h2><Upload size={17}/>Import licensed media</h2><span className="pill">Local files · up to 250 MiB</span></div>
         <form className="detail-body production-import" onSubmit={e => {e.preventDefault(); void work('Importing media', async () => {

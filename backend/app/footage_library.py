@@ -36,9 +36,14 @@ def place(asset, start, seconds):
     Returns None when the clip cannot hold the range. Without shot analysis, or when no single
     shot is long enough, the plain start is used; a cut never loops or overlaps an earlier range."""
     limit = asset['seconds'] + .01
+    changes = asset.get('shot_starts') or []
+    # Openings are often slates, titles or countdowns: skip the first camera shot of a longer clip,
+    # or at least the first few seconds when no shot analysis exists.
+    if (asset.get('seconds') or 0) > 20:
+        opening = next((c for c in changes if c <= 15), None) if changes else min(4, asset['seconds'] * .1)
+        start = max(start, opening or 0)
     if start + seconds > limit:
         return None
-    changes = asset.get('shot_starts') or []
     candidate = start
     for change in changes:
         if change <= candidate + EDGE:

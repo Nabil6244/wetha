@@ -129,14 +129,48 @@ def mercator(lon,lat):
     return [6378137*math.radians(lon),6378137*math.log(math.tan(math.pi/4+math.radians(lat)/2))]
 
 
-def radar_url(layer,stamp,legend=False):
+def radar_times(body):
+    """Layer name and every advertised observation time, from either a list or a start/end/period range."""
+    root=xml_document(body)
+    for layer in root.iter():
+        if layer.tag.split('}')[-1]!='Layer':continue
+        names=[child.text for child in layer if child.tag.split('}')[-1]=='Name']
+        if not names or 'reflectivity' not in names[0].lower() or not re.fullmatch(r'[A-Za-z0-9_:.-]+',names[0]):continue
+        dimensions=[child for child in layer if child.tag.split('}')[-1] in ('Dimension','Extent') and child.attrib.get('name')=='time']
+        if not dimensions or not dimensions[0].text:continue
+        text=dimensions[0].text.strip()
+        if '/' in text:
+            start,end,period=text.split('/')
+            match=re.fullmatch(r'PT(\d+)M',period)
+            if not match or not 1<=int(match.group(1))<=60:continue
+            first=datetime.fromisoformat(utc_stamp(start));last=datetime.fromisoformat(utc_stamp(end));step=timedelta(minutes=int(match.group(1)))
+            times=[];t=last
+            while t>=first and len(times)<2000:times.append(t);t-=step
+            return names[0],sorted(times)
+        return names[0],sorted({datetime.fromisoformat(utc_stamp(t.strip())) for t in text.split(',') if t.strip()})
+    raise ValueError('Radar capabilities do not expose a timestamped reflectivity layer.')
+
+
+def region_extent(region):
+    """A 16:9 box (in degrees) around a story region, at least 6 degrees wide, inside the radar mosaic."""
+    cx,cy=(region[0]+region[2])/2,(region[1]+region[3])/2
+    width=max(6,region[2]-region[0]+3);height=width*9/16
+    if region[3]-region[1]+2>height:
+        height=region[3]-region[1]+2;width=height*16/9
+    return [round(max(RADAR_EXTENT[0],cx-width/2),3),round(max(RADAR_EXTENT[1],cy-height/2),3),
+            round(min(RADAR_EXTENT[2],cx+width/2),3),round(min(RADAR_EXTENT[3],cy+height/2),3)]
+
+
+def radar_url(layer,stamp,legend=False,extent=None):
     base={'service':'WMS','version':'1.3.0'}
     if legend:
         return RADAR_BASE+'?'+urlencode({**base,'request':'GetLegendGraphic','layer':layer,'format':'image/png'})
     # nowCOAST accepts UTC Z timestamps; equivalent +00:00 offsets are rejected.
     stamp=utc_stamp(stamp).replace('+00:00','Z')
-    west,south=mercator(*RADAR_EXTENT[:2]);east,north=mercator(*RADAR_EXTENT[2:])
-    return RADAR_BASE+'?'+urlencode({**base,'request':'GetMap','layers':layer,'styles':'','format':'image/png','transparent':'true','crs':'EPSG:3857','bbox':','.join(str(v) for v in (west,south,east,north)),'width':'1200','height':'720','time':stamp})
+    box=extent or RADAR_EXTENT
+    west,south=mercator(*box[:2]);east,north=mercator(*box[2:])
+    width,height=('1600','900') if extent else ('1200','720')
+    return RADAR_BASE+'?'+urlencode({**base,'request':'GetMap','layers':layer,'styles':'','format':'image/png','transparent':'true','crs':'EPSG:3857','bbox':','.join(str(v) for v in (west,south,east,north)),'width':width,'height':height,'time':stamp})
 
 
 def image_size(body,content_type):
@@ -279,6 +313,28 @@ class VisualEvidence:
             detail=str(error) if isinstance(error,ValueError) else type(error).__name__+': official visual source unavailable; cached evidence preserved'
             self.store.visual_source_status(identity,'failed',detail);self.store.finish_job(job,'failed',detail)
             raise ValueError(detail) from None
+
+    async def collect_radar_at(self,moment,region,frames=6):
+        """Radar frames ending at a story's time, cropped to its region, if NOAA still serves that time."""
+        body,_=await self.fetch(RADAR_BASE+'?service=WMS&request=GetCapabilities')
+        layer,times=radar_times(body)
+        # Frames up to the story time, from the hour before it; never frames from after or far before.
+        stamps=[t for t in times if moment-timedelta(minutes=60)<=t<=moment+timedelta(minutes=5)][-frames:]
+        if len(stamps)<2:
+            raise ValueError(f'Radar for {moment:%d %b %H:%M UTC} is not served any more (NOAA nowCOAST offers {times[0]:%d %b %H:%M} to {times[-1]:%d %b %H:%M UTC}).' if times else 'NOAA nowCOAST lists no radar times.')
+        extent=region_extent(region)
+        legend_url=radar_url(layer,utc_stamp(stamps[-1].isoformat()),True)
+        legend,mime=await self.fetch(legend_url);size=image_size(legend,mime)
+        try:legend_id=self.store.save_visual_asset({'kind':'radar_legend','source_url':legend_url,'observed_at':utc_stamp(stamps[-1].isoformat()),'content_type':mime,'metadata':{'width':size[0],'height':size[1],'attribution':'NOAA nowCOAST','label':'Source-provided reflectivity legend (dBZ)'}},legend)
+        except ValueError:legend_id=next(a['id'] for a in self.store.visual_assets('radar_legend') if a['source_url']==legend_url)
+        ids=[]
+        for stamp in stamps:
+            stamp=utc_stamp(stamp.isoformat());url=radar_url(layer,stamp,extent=extent)
+            existing=next((a for a in self.store.visual_assets('radar') if a['source_url']==url),None)
+            if existing:ids.append(existing['id']);continue
+            image,mime=await self.fetch(url);size=image_size(image,mime)
+            ids.append(self.store.save_visual_asset({'kind':'radar','source_url':url,'observed_at':stamp,'content_type':mime,'metadata':{'width':size[0],'height':size[1],'product':layer,'data_class':'radar_observation','projection':'EPSG:3857','extent':extent,'legend_asset_id':legend_id,'attribution':'NOAA nowCOAST','note':'Reflectivity is measured in dBZ; it is not a rainfall accumulation estimate.'}},image))
+        return ids
 
     def asset(self,identity):
         row=self.store.visual_asset(identity)

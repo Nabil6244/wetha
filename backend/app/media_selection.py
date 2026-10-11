@@ -23,8 +23,39 @@ GROUPS = {
     'traffic': ('road', 'roads', 'highway', 'highways', 'traffic', 'bridge', 'bridges', 'interstate', 'travel'),
     'residents': ('residents', 'people', 'families', 'community', 'communities', 'neighborhood', 'neighborhoods', 'homes'),
     'sky': ('clouds', 'cloud', 'sky', 'skies', 'overcast', 'darkened'),
+    'ice': ('ice', 'icy', 'sleet', 'glaze', 'frozen'),
+    'heat': ('heat', 'heatwave', 'hot', 'scorching', 'swelter'),
+    'cold': ('cold', 'frigid', 'freeze', 'chill', 'subzero'),
+    'drought': ('drought', 'dry', 'parched', 'arid'),
 }
 CONCEPTS = {'damage', 'rescue', 'cleanup', 'power', 'traffic', 'residents', 'sky'}
+# What a clip shows: the weather itself, what it did, the human response, or a general establishing shot.
+SHOT_CLASSES = {
+    'phenomenon': {'wind', 'rain', 'storm', 'tornado', 'snow', 'hail', 'lightning', 'waves', 'wildfire', 'ice', 'heat', 'cold', 'drought'},
+    'impact': {'damage', 'flood', 'power', 'traffic'},
+    'response': {'rescue', 'cleanup', 'preparedness', 'residents'},
+    'establishing': {'sky'},
+}
+
+
+def shot_classes(tags):
+    return {name for name, members in SHOT_CLASSES.items() if members & tags}
+
+
+def location_confidence(asset):
+    catalog = asset.get('catalog', {})
+    if catalog.get('location_reviewed') and catalog.get('region_codes'):
+        return 'reviewed'
+    return 'provisional' if (catalog.get('location') or '').strip() else 'unknown'
+
+
+def temporal_label(asset, advisory):
+    """current: declared capture date is the advisory date; archival: an earlier date; unknown otherwise."""
+    captured = asset.get('catalog', {}).get('captured_at') or ''
+    issued = getattr(advisory, 'issued_at', None)
+    if not captured or issued is None:
+        return 'unknown'
+    return 'current' if captured[:10] == issued.date().isoformat() else 'archival'
 GRAPHICS = {'storm_track', 'cinematic_weather_map', 'what_changed', 'radar_animation', 'satellite_timelapse'}
 
 
@@ -33,7 +64,7 @@ def topics(text):
     return {topic for topic, variants in GROUPS.items() if words.intersection(variants)}
 
 
-def rank(scene, assets, advisory, unavailable=(), limit=5):
+def rank(scene, assets, advisory, unavailable=(), limit=5, allow_unverified=False):
     wanted = topics(scene.get('source_claim_text') or scene['script_segment'])
     if scene.get('parameters',{}).get('story',{}).get('beat') in ('context','reveal'):
         wanted |= {'storm','rain','wind','waves'}
@@ -41,6 +72,8 @@ def rank(scene, assets, advisory, unavailable=(), limit=5):
     story_only = not wanted
     if story_only:
         wanted = topics(' '.join(str(getattr(advisory, k, '') or '') for k in ('title', 'forecast_excerpt'))) - CONCEPTS
+    from .visual_director import classify, story_text
+    intent = scene.get('parameters', {}).get('visual_intent') or classify(scene['script_segment'], story_text(advisory))
     results = []
     for asset in assets:
         if asset['kind'] == 'audio' or asset['id'] in unavailable or not asset.get('rights_confirmed'):
@@ -48,18 +81,21 @@ def rank(scene, assets, advisory, unavailable=(), limit=5):
         if 'images.nasa.gov' in asset.get('source','') and not topics(asset.get('name','')):
             # Query-derived tags alone cannot turn a space launch into weather footage.
             continue
-        if not regional.match_media(scene, asset):
+        place = regional.location_status(scene, asset)
+        if place == 'elsewhere' or (place == 'unverified' and not allow_unverified):
             continue
         catalog = asset.get('catalog', {})
-        shared = wanted & topics(' '.join(catalog.get('tags', [])) + ' ' + asset['name'])
+        tags = topics(' '.join(catalog.get('tags', [])) + ' ' + asset['name'])
+        shared = wanted & tags
         if not shared:
             continue
+        classes = shot_classes(tags)
         seconds = min(4, max(3, asset.get('preferred_clip_seconds', 3.5)))
         start = catalog.get('preferred_trim_start', 0)
         if asset['kind'] == 'video' and start + seconds > asset['seconds'] + .01:
             continue
-        reasons = (['Reviewed capture region matches script'] if regional.targets(scene) else []) + [('Story topics: ' if story_only else 'Weather topics: ') + ', '.join(sorted(shared))]
-        score = sum(6 if topic in CONCEPTS else 10 for topic in shared) + (2 if asset['kind'] == 'video' else 0) - (6 if story_only else 0)
+        reasons = (['Reviewed capture region matches script'] if place == 'reviewed' else ['Filming location not verified; labelled on screen'] if place == 'unverified' else []) + [('Story topics: ' if story_only else 'Weather topics: ') + ', '.join(sorted(shared))]
+        score = sum(6 if topic in CONCEPTS else 10 for topic in shared) + (2 if asset['kind'] == 'video' else 0) - (6 if story_only else 0) - (8 if place == 'unverified' else 0)
         event = catalog.get('event_id', '')
         if event and event.casefold() == advisory.event_key.casefold():
             score += 30
@@ -77,8 +113,26 @@ def rank(scene, assets, advisory, unavailable=(), limit=5):
         if location and location.casefold() in scene['script_segment'].casefold():
             score += 10
             reasons.append('Declared location appears in script')
+        # The beat's meaning decides what the shot should show.
+        wanted_class = intent['footage_class']
+        if wanted_class in classes:
+            score += 8
+            reasons.append(f'Shows {wanted_class}, as a {intent["intent"]} beat needs')
+        elif wanted_class in ('impact', 'response') and classes <= {'phenomenon', 'establishing'}:
+            score -= 4
+            reasons.append(f'Shows the weather, not the {wanted_class} this beat describes')
+        if classes == {'establishing'} and wanted_class != 'establishing':
+            score -= 6  # General atmosphere never outranks specific evidence.
+        width = asset.get('width') or 0
+        if width >= 1920:
+            score += 2
+        elif width and width < 1280:
+            score -= 3
+            reasons.append('Below 720p')
         results.append({'media_id': asset['id'], 'name': asset['name'], 'score': score,
                         'reasons': reasons, 'seconds': seconds, 'trim_start': start,
+                        'shot_classes': sorted(classes), 'location_confidence': location_confidence(asset), 'location_status': place,
+                        'temporal': temporal_label(asset, advisory),
                         'context': asset['context'], 'source_provider': asset.get('source_provider', 'local'),
                         'attribution': asset['attribution'], 'source': asset['source'],
                         'label': asset['context'].upper() + ' FOOTAGE'})

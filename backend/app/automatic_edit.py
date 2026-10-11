@@ -58,6 +58,9 @@ def subdivide(plan, job):
             shot.update(id=f"{scene['id']}-shot-{index+1}",parent_scene_id=scene['id'],script_segment=' '.join(words[word_cursor:end]),target_seconds=length/30)
             # Shots of one section continue a single camera move and graphic reveal.
             shot.setdefault('parameters',{})['camera_span']=[round(begin/frames,6),round(cursor/frames,6)]
+            if starts:
+                # Spoken start of each caption word, in frames from this shot's start.
+                shot['word_frames']=[max(0,min(length-1,f-begin)) for f in starts[word_cursor:end]]
             word_cursor=end
             result['scenes'].append(shot)
             edits.append({'id':shot['id'],'seconds':length/30,'media_id':None,'trim_start':0,'transition':'cut'})

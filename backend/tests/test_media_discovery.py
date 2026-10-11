@@ -128,6 +128,7 @@ def test_nasa_fallback_uses_real_camera_archive_and_preserves_duplicate_checksum
                 'description':'A dated hurricane offshore near Florida.','date_created':'2019-01-01T00:00:00Z'}]}]}})
         if str(request.url)==collection:return httpx.Response(200,json=[video.replace('https:','http:')])
         if request.method=='HEAD' and str(request.url)==video:return httpx.Response(200,headers={'content-length':'1000'})
+        if request.url.host=='archive.org':return httpx.Response(200,json={'response':{'docs':[]}})  # Internet Archive: no results
         raise AssertionError(str(request.url))
     with TestClient(create_app(tmp_path,discovery_transport=httpx.MockTransport(transport))) as client:
         result=client.post('/api/production/discovery/search',json={'query':'Florida storm','provider':'all','kind':'video'}).json()
