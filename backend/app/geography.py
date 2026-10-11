@@ -3,10 +3,14 @@
 States come from the bundled Census-derived state outlines. Named regions (Gulf Coast, Panhandle,
 Big Bend...) are defined as groups of states plus a labelled extent; they are drawn as the member
 states' real outlines with a region label, never as an invented polygon. Counties come from the
-story's own NWS alert county codes and the official NWS zone geometry for those codes.
+story's own NWS alert county codes and the official NWS zone geometry for those codes; when a zone
+outline cannot be fetched, the bundled Census 2024 county outline for the same code is used. Counties
+named in the narration itself light up at the word where they are spoken.
 """
 import json
 import re
+from functools import lru_cache
+from pathlib import Path
 from . import regional
 
 # Named regions: label, member states, extent [W, S, E, N]. The extent frames the view only.
@@ -173,20 +177,26 @@ def draw_places(image, places, bounds, t, warning=None):
     draw.rectangle((1500, 750, 1860, 960), outline='#365666', width=2)
 
 
-def draw_counties(image, shapes, bounds, t, warning=None):
-    """Official NWS county outlines for the warned counties, labelled, with the warning polygon on top."""
+def draw_counties(image, shapes, bounds, t, warning=None, spoken=None):
+    """County outlines for the story, labelled, with the warning polygon on top. Counties named in this
+    shot's narration (`spoken`: code -> fraction of the shot where the name is said) light up then."""
     from PIL import Image, ImageDraw
     from .broadcast import map_point, label, easing
+    spoken = spoken or {}
     u = easing(min(1, t * 2));layer = Image.new('RGBA', image.size, (0, 0, 0, 0));d = ImageDraw.Draw(layer)
     centres = []
     for shape in shapes:
-        geometry = shape['geometry']
+        geometry = shape['geometry'];at = spoken.get(shape['code'])
+        lit = easing(min(1, max(0, (t - at) * 4))) if at is not None else 0
+        fill = (101, 225, 209, int((30 if spoken else 55) * u + 140 * lit))
         for polygon in (geometry['coordinates'] if geometry['type'] == 'MultiPolygon' else [geometry['coordinates']]):
             points = [map_point(c, bounds) for c in polygon[0]]
             if len(points) >= 3:
-                d.polygon(points, fill=(101, 225, 209, int(55 * u)), outline=(190, 240, 235, 255))
-                d.line(points + [points[0]], fill=(190, 240, 235, 255), width=3)
-                xs, ys = zip(*points);centres.append((shape['name'], sum(xs) / len(xs), sum(ys) / len(ys)))
+                d.polygon(points, fill=fill, outline=(190, 240, 235, 255))
+                d.line(points + [points[0]], fill=(130, 239, 220, 255) if lit else (190, 240, 235, 255), width=6 if lit else 3)
+                xs, ys = zip(*points)
+                full = _county_index().get(shape['code'], {}).get('label', shape['name'])  # "Orleans Parish", "Hillsborough County"
+                centres.append((shape['name'], sum(xs) / len(xs), sum(ys) / len(ys), lit, at is not None, full))
     for feature in warning or []:
         geometry = feature['geometry']
         for polygon in (geometry['coordinates'] if geometry['type'] == 'MultiPolygon' else [geometry['coordinates']]):
@@ -196,13 +206,23 @@ def draw_counties(image, shapes, bounds, t, warning=None):
                 d.line(points + [points[0]], fill=(255, 200, 135, 255), width=5)
     image.paste(Image.alpha_composite(image.convert('RGBA'), layer).convert('RGB'))
     draw = ImageDraw.Draw(image);seen = set()
-    for name, x, y in centres:
-        if name in seen or not (40 < x < 1800 and 100 < y < 950):
+    # Spoken counties are labelled last (on top) and larger, once they have lit up.
+    for name, x, y, lit, named, full in sorted(centres, key=lambda c: c[4]):
+        if name in seen or not (40 < x < 1800 and 100 < y < 950) or (named and lit < .3):
             continue
-        seen.add(name);label(draw, (x - 9 * len(name), y - 16), name.upper(), 30, '#ffffff')
-    draw.rectangle((55, 120, 760, 176), fill='#061724')
-    label(draw, (80, 130), 'WARNED AREAS · NWS ZONE OUTLINES', 30, '#82efdc')
-    label(draw, (80, 900), 'Orange: warning polygon issued by the NWS office', 22, '#ffc887')
+        seen.add(name)
+        if named:
+            text = full.upper()
+            draw.rectangle((x - 13 * len(text) - 12, y - 24, x + 13 * len(text) + 12, y + 30), fill='#061724')
+            label(draw, (x - 13 * len(text), y - 20), text, 44, '#ffffff')
+        else:
+            label(draw, (x - 9 * len(name), y - 16), name.upper(), 30, '#ffffff')
+    census = any(s.get('source') == 'census' for s in shapes);zones = any(s.get('source') != 'census' for s in shapes)
+    title = 'COUNTY OUTLINES · US CENSUS 2024' if census and not zones else 'WARNED AREAS · NWS ZONE + CENSUS OUTLINES' if census else 'WARNED AREAS · NWS ZONE OUTLINES'
+    draw.rectangle((55, 120, 80 + 19 * len(title), 176), fill='#061724')
+    label(draw, (80, 130), title, 30, '#82efdc')
+    if warning:
+        label(draw, (80, 900), 'Orange: warning polygon issued by the NWS office', 22, '#ffc887')
 
 
 async def fetch_counties(store, client, advisory):
@@ -237,7 +257,61 @@ def county_shapes(store, advisory):
         if asset['source_url'] in wanted:
             body = json.loads(store.visual_asset(asset['id'])['body'])
             shapes.append({'code': asset['metadata']['ugc'], 'name': asset['metadata']['name'], 'geometry': body['geometry']})
+    # Alert counties whose NWS outline is not cached (offline, or the zone service failed) use the bundled Census outline.
+    have = {s['code'] for s in shapes}
+    shapes += [bundled_county(code) for code, _ in counties(advisory) if code not in have and code in _county_index()]
     return shapes
+
+
+@lru_cache(maxsize=1)
+def _county_index():
+    return json.loads((Path(__file__).parent / 'data/us-counties.json').read_text())['counties']
+
+
+def bundled_county(code):
+    """Census 2024 outline for an NWS county code (e.g. FLC057), shaped like a cached zone outline."""
+    county = _county_index()[code]
+    return {'code': code, 'name': county['name'], 'source': 'census',
+            'geometry': {'type': 'MultiPolygon', 'coordinates': [[ring] for ring in county['rings']]}}
+
+
+def story_states(parameters, advisory, text=''):
+    """States a story covers: its alert counties, states named in the text, and states its geography touches."""
+    from .observations import intersects, story_bounds
+    states = {code[:2] for code, _ in counties(advisory)} | {c for m in mentions(text) for c in m['states']}
+    region = story_bounds(parameters)
+    if region:
+        states |= {code for code, r in _state_index().items() if intersects(r['bounds'], region)}
+    return states
+
+
+def alert_codes(parameters, advisory):
+    """NWS county codes the story's own alert names, used to settle county names shared across states."""
+    return {code for code, _ in counties(advisory)} | {s['code'] for s in parameters.get('county_shapes', [])}
+
+
+def county_mentions(text, states, prefer=()):
+    """Counties named in narration ("Hillsborough County", "Hillsborough and Pinellas counties"), only
+    within `states`. A name shared by counties in several of those states is resolved by the story's own
+    alert counties (`prefer`, NWS codes); if they do not settle it, it is ambiguous and skipped."""
+    found = {};lowered = text.lower()
+    lists = [m.span(1) for m in re.finditer(r"((?:[\w.'’-]+(?:\s+[\w.'’-]+)?(?:,\s*|,?\s+and\s+))+[\w.'’-]+(?:\s+[\w.'’-]+)?)\s+(?:counties|parishes)\b", lowered)]
+    by_name = {}
+    for code, county in _county_index().items():
+        if county['state'] in states:
+            by_name.setdefault(county['name'].lower(), []).append(code)
+    for name, codes in by_name.items():
+        if len(codes) > 1:
+            codes = [c for c in codes if c in prefer]
+            if len(codes) != 1:
+                continue
+        spans = [m.start() for m in re.finditer(r'(?<!\w)' + re.escape(name) + r'\s+(?:county|parish|borough)\b', lowered)]
+        for a, b in lists:
+            spans += [a + m.start() for m in re.finditer(r'(?<!\w)' + re.escape(name) + r'(?!\w)', lowered[a:b])]
+        if spans:
+            start = min(spans);found[codes[0]] = {'code': codes[0], 'name': _county_index()[codes[0]]['name'], 'start': start,
+                                                'word': len(text[:start].split())}
+    return sorted(found.values(), key=lambda m: m['start'])
 
 
 def locator(places, size=(440, 280)):

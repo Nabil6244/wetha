@@ -130,6 +130,10 @@ def candidates(scene, advisory):
     if p.get('county_shapes'):
         names = [s['name'].split(',')[0].strip() for s in p['county_shapes']]
         rows.append(('county_focus', story, 5 if any(re.search(r'(?<!\w)' + re.escape(n) + r'(?!\w)', text, re.I) for n in names) else 2))
+    spoken = geography.county_mentions(text, geography.story_states(p, advisory, text), geography.alert_codes(p, advisory))
+    if spoken:
+        # A county named in this beat is the most specific place on screen: it outranks its state.
+        rows.append(('county_focus', 'spoken:' + ','.join(m['code'] for m in spoken), 10))
     if getattr(advisory, 'provider', '') == 'NWS' and (p.get('facts') or {}).get('description'):
         rows.append(('warning_card', story, 4 if re.search(r'\b(warn\w*|bulletin|alert|issued|in effect|until|expires?)\b', text, re.I) else 1))
     if p.get('radar_option'):
@@ -145,7 +149,7 @@ def candidates(scene, advisory):
 def apply(scene, state, key, advisory):
     p = scene['parameters'];direction = scene['direction'];camera = {'movement': 'camera_drift', 'easing': 'smoothstep'}
     p.pop('camera_span', None)  # A new state is a real cut; its motion runs from the start.
-    for stale in ('visual_state', 'focus_coord', 'focus_label', 'state_quote', 'state_facts', 'state_places', 'place_warning', 'warning_card'):
+    for stale in ('visual_state', 'focus_coord', 'focus_label', 'state_quote', 'state_facts', 'state_places', 'place_warning', 'warning_card', 'spoken_counties'):
         p.pop(stale, None)
     p['visual_state'] = state
     if state in HEADLINES:
@@ -173,13 +177,25 @@ def apply(scene, state, key, advisory):
         direction['fallback'] = None;direction['headline'] = ' · '.join(names).upper()[:60]
         camera.update(start_zoom=1, end_zoom=1.06)
     elif state == 'county_focus':
-        shapes = p['county_shapes'];points = []
-        for shape in shapes:
+        text = scene['script_segment'];spoken = geography.county_mentions(text, geography.story_states(p, advisory, text), geography.alert_codes(p, advisory))
+        shapes = p.get('county_shapes', [])
+        if key.startswith('spoken:'):
+            codes = key.split(':', 1)[1].split(',');have = {s['code'] for s in shapes}
+            # A new list: the story's alert outlines are shared by its other shots.
+            p['county_shapes'] = shapes = shapes + [geography.bundled_county(c) for c in codes if c not in have]
+            direction['headline'] = ' · '.join(m['name'].upper() for m in spoken)[:60]
+        names = {s['code'] for s in shapes};words = max(1, len(text.split()))
+        # Each named county lights up at the point in the shot where its name is said.
+        p['spoken_counties'] = {m['code']: round(m['word'] / words, 3) for m in spoken if m['code'] in names}
+        focus = [s for s in shapes if s['code'] in p['spoken_counties']] if key.startswith('spoken:') else shapes;points = []
+        for shape in focus:
             for polygon in (shape['geometry']['coordinates'] if shape['geometry']['type'] == 'MultiPolygon' else [shape['geometry']['coordinates']]):
                 points += polygon[0]
         p['bounds'] = [min(q[0] for q in points) - .5, min(q[1] for q in points) - .35, max(q[0] for q in points) + .5, max(q[1] for q in points) + .35]
         p['place_warning'] = [f for f in p.get('geojson', {}).get('features', []) if f.get('properties', {}).get('kind') == 'alert_area']
-        direction['fallback'] = None;direction['headline'] = (getattr(advisory, 'title', '') or 'Warned counties').upper()[:60]
+        direction['fallback'] = None
+        if not key.startswith('spoken:'):
+            direction['headline'] = (getattr(advisory, 'title', '') or 'Warned counties').upper()[:60]
         camera.update(start_zoom=1, end_zoom=1.08)
     elif state == 'warning_card':
         p['warning_card'] = warning_details(advisory)

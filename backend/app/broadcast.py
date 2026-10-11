@@ -360,7 +360,7 @@ class Composer:
                 d=ImageDraw.Draw(image)
             if p.get('visual_state')=='county_focus' and p.get('county_shapes'):
                 from .geography import draw_counties
-                draw_counties(image,p['county_shapes'],self.bounds,t,p.get('place_warning'))
+                draw_counties(image,p['county_shapes'],self.bounds,t,p.get('place_warning'),p.get('spoken_counties'))
                 d=ImageDraw.Draw(image)
             if p.get('visual_state')=='severe_outlook' and p.get('outlook'):
                 from .spc import draw as draw_outlook
