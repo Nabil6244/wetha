@@ -106,6 +106,18 @@ def srt_time(seconds):
     return f'{hours:02}:{minutes:02}:{secs:02},{ms:03}'
 
 
+
+def scene_geography(identity, cited_ids, geography_of):
+    """A shot's geography for an audited claim: (story geography, other cited stories' geometry or None).
+
+    The story geography is the primary story's own, including its own overlapping warnings. Other stories the
+    claim cites keep their geometry and provenance in a separate collection, so they are never framed, drawn or
+    searched as this story's warning area."""
+    own = {'type': 'FeatureCollection', 'features': list(geography_of(identity)['features'])}
+    cited = [dict(f, properties={**f['properties'], 'cited_by_advisory_id': identity})
+             for source_id in dict.fromkeys(cited_ids) if source_id != identity for f in geography_of(source_id)['features']]
+    return own, ({'type': 'FeatureCollection', 'features': cited} if cited else None)
+
 class Production:
     def __init__(self, store, describe_script, describe_scripts=None):
         self.store = store
@@ -591,11 +603,12 @@ class Production:
                         p.pop(key,None)
                     if scene['type'] in ('satellite_timelapse','satellite_wide','radar_animation'):
                         scene['type']='cinematic_weather_map'
-                all_features=[]
                 for source_id in row['source_advisory_ids']:
                     if source_id not in geography:geography[source_id]=visual.geography(source_id)
-                    all_features.extend(geography[source_id]['geojson']['features'])
-                p.update(source_advisory_id=identity,geojson={'type':'FeatureCollection','features':all_features})
+                own,cited=scene_geography(identity,row['source_advisory_ids'],lambda i:geography[i]['geojson'])
+                p.update(source_advisory_id=identity,geojson=own)
+                if cited:p['cited_geojson']=cited
+                else:p.pop('cited_geojson',None)
                 scene['source_refs']=row['source_advisory_ids']
                 scene['source_advisory_ids']=row['source_advisory_ids']
                 scene['source_audit']=row
