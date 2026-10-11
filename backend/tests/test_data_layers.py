@@ -296,3 +296,55 @@ def test_a_cited_story_warning_never_leaks_into_another_storys_scene():
     scene['direction'] = broadcast.director(scene, 'urn:m', 4)
     assert assign([scene], lambda _: advisory) == ['place_focus']
     assert {f['properties']['advisory_id'] for f in p['place_warning']} == {'marine', 'marine-update'}   # drawn warnings: own only
+
+
+def test_the_regional_label_names_the_shots_own_story_and_keeps_other_citations():
+    # From a real bulletin: the Altamaha Sound marine-warning shot was titled "Alabama, Florida, Georgia /
+    # regional context" because its beat also cited an Alabama flash flood warning.
+    from app import regional
+    marine = {'type': 'Feature', 'properties': {'kind': 'alert_area', 'advisory_id': 'marine'},
+              'geometry': {'type': 'Polygon', 'coordinates': [[[-81.36, 30.58], [-80.35, 30.58], [-80.35, 31.28], [-81.36, 31.28], [-81.36, 30.58]]]}}
+    text = 'Off Georgia and northeast Florida a strong thunderstorm threatened small boats, while flash flooding hit Alabama.'
+    scene = {'id': 's', 'type': 'cinematic_weather_map', 'script_segment': text, 'regional_focus': 'auto', 'cuts': [], 'media_id': None,
+             'parameters': {'geojson': {'type': 'FeatureCollection', 'features': [marine]}, 'credit': 'NWS · issued 2026-10-10T06:40'},
+             'direction': {'layers': ['alert_area'], 'camera': {}}}
+    result = regional.focus(scene, {}, 'broadcast')
+    p = scene['parameters']
+    assert p['regional_title'] == 'Florida, Georgia' and p['regional_cited'] == 'Alabama'
+    assert result['regions'] == ['FL', 'GA'] and result['cited_regions'] == ['AL']
+    assert p['credit'].endswith('Florida, Georgia · Census 2024 boundaries · Also cited: Alabama')   # attribution kept
+    assert p['bounds'][0] > -89 and [f['properties']['advisory_id'] for f in p['geojson']['features']] == ['marine']
+
+
+def test_a_shot_naming_only_another_storys_state_is_located_by_its_own_story():
+    # From the same bulletin: a Coastal Dixie (Florida) storm surge shot whose words named only Alabama was titled "Alabama".
+    from app import regional
+    dixie = {'type': 'Feature', 'properties': {'kind': 'alert_area', 'advisory_id': 'surge'},
+             'geometry': {'type': 'Polygon', 'coordinates': [[[-83.45, 29.29], [-82.99, 29.29], [-82.99, 29.72], [-83.45, 29.72], [-83.45, 29.29]]]}}
+    scene = {'id': 's', 'type': 'cinematic_weather_map', 'script_segment': 'Dixie, flash flooding across parts of Alabama,', 'regional_focus': 'auto',
+             'cuts': [], 'media_id': None, 'parameters': {'geojson': {'type': 'FeatureCollection', 'features': [dixie]}, 'credit': 'NWS'},
+             'direction': {'layers': ['alert_area'], 'camera': {}}}
+    regional.focus(scene, {}, 'broadcast')
+    assert scene['parameters']['regional_title'] == 'Florida' and scene['parameters']['regional_cited'] == 'Alabama'
+    assert scene['parameters']['credit'].endswith('Florida · Census 2024 boundaries · Also cited: Alabama')
+
+
+def test_a_place_named_only_for_a_cited_story_gets_no_shot_in_this_story():
+    # The Coastal Dixie shot whose words named Alabama (another cited story) became an Alabama map credited to the surge warning.
+    from app import regional
+    from app.visual_states import assign
+    dixie = {'type': 'Feature', 'properties': {'kind': 'alert_area', 'advisory_id': 'surge'},
+             'geometry': {'type': 'Polygon', 'coordinates': [[[-83.45, 29.29], [-82.99, 29.29], [-82.99, 29.72], [-83.45, 29.72], [-83.45, 29.29]]]}}
+    advisory = SimpleNamespace(title='Storm Surge Warning', event_key='urn:s', forecast_excerpt='', warnings=[], provider='NWS', area='Coastal Dixie',
+                               issued_at=datetime(2026, 10, 10, 6, 7, tzinfo=timezone.utc), facts={}, source_payload={})
+    def shot(text):
+        scene = {'id': 's', 'type': 'region_focus', 'script_segment': text, 'regional_focus': 'auto', 'seconds': 4, 'cuts': [], 'media_id': None,
+                 'map_mode': 'auto', 'graphic_style': 'auto', 'parameters': {'source_advisory_id': 'surge', 'geojson': {'type': 'FeatureCollection', 'features': [dixie]}, 'credit': 'NWS'}}
+        scene['direction'] = broadcast.director(scene, 'urn:s', 4)
+        regional.focus(scene, {}, 'broadcast')
+        return scene, assign([scene], lambda _: advisory)[0]
+    scene, state = shot('Storm surge along Coastal Dixie, flash flooding across parts of Alabama,')
+    assert state != 'place_focus' and 'state_places' not in scene['parameters']
+    assert scene['parameters']['regional_title'] == 'Florida'
+    scene, state = shot('Storm surge threatened the Florida coast near Cedar Key.')
+    assert state == 'place_focus' and [m['name'] for m in scene['parameters']['state_places']] == ['Florida']   # own state still gets its shot

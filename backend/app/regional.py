@@ -33,6 +33,27 @@ def targets(scene):
     return names
 
 
+def split_targets(scene):
+    """(primary, cited) among the states a beat names: primary are those the shot's own warning areas touch,
+    or, when it names none of them, the state its warning areas lie in; cited are named for other stories the
+    beat cites. Without own warning areas to test, all named states are primary."""
+    wanted=targets(scene)
+    # The story's location is its own warning areas; a storm-centre point or track is not a place claim.
+    own=[f['geometry'] for f in scene.get('parameters',{}).get('geojson',{}).get('features',[]) if f.get('geometry') and f.get('properties',{}).get('kind')=='alert_area']
+    index={r['code']:r for r in catalogue()['regions']}
+    if not own or scene.get('regional_focus','auto')!='auto':
+        return wanted,[]
+    primary=[c for c in wanted if c in index and any(intersects(index[c]['bounds'],g) for g in own)]
+    if not primary:
+        # The beat names only other stories' places: the shot is located by its own geography instead.
+        pts=[q for g in own for q in points(g['coordinates'])]
+        x,y=sum(q[0] for q in pts)/len(pts),sum(q[1] for q in pts)/len(pts)
+        primary=[c for c,r in index.items() if r['bounds'][0]<=x<=r['bounds'][2] and r['bounds'][1]<=y<=r['bounds'][3]]
+        if not primary:
+            return wanted,[]
+    return primary,[c for c in wanted if c not in primary]
+
+
 def location_status(scene,asset):
     """'unscoped' (beat names no place), 'reviewed' (reviewed capture region matches), 'elsewhere'
     (reviewed capture region is another place), or 'unverified' (location unknown or only declared)."""
@@ -83,6 +104,10 @@ def focus(scene,media,presentation,allow_unverified=False):
         return {'regions':wanted,'status':'reviewed_capture_location','note':'Location is editor-attested from the recorded reference; event attribution remains separately labeled.'}
     if presentation!='broadcast':
         raise ValueError(f'{names}: use Broadcast style for a region-focused source graphic or choose location-reviewed footage.')
+    # The map describes the shot's own story; places named only for other cited stories stay as attribution.
+    wanted,cited=split_targets(scene)
+    regions=[r for r in catalogue()['regions'] if r['code'] in wanted];names=', '.join(r['name'] for r in regions)
+    cited_names=', '.join(r['name'] for r in catalogue()['regions'] if r['code'] in cited)
     p=scene['parameters'];sd=scene['direction']
     if scene.get('type')=='what_changed' or scene.get('graphic_style','auto') in ('change_gauge','comparison_split','advisory_timeline','question_reveal','forecast_clock'):
         raise ValueError(f'{names}: storm-wide advisory statistics cannot be presented as local measurements. Supply a source-linked local data scene.')
@@ -102,6 +127,8 @@ def focus(scene,media,presentation,allow_unverified=False):
     p['map_warning_text'] = [text for text in p.get('map_warning_text',[]) if set(named_regions(text)) & set(wanted)]
     p['map_forecast_text'] = ' '.join(sentence for sentence in re.split(r'(?<=[.!?]) +',p.get('map_forecast_text','')) if set(named_regions(sentence)) & set(wanted))
     p['bounds']=bounds;p['regional_boundaries']=copy.deepcopy(regions);p['regional_title']=names
+    if cited_names:p['regional_cited']=cited_names;p['regional_cited_codes']=cited
+    else:p.pop('regional_cited',None);p.pop('regional_cited_codes',None)
     p['regional_cartography']={k:catalogue()[k] for k in ('source_url','source_checksum','year','note')}
     p['facts']={} # Prevent automatically drawing storm-wide winds/pressure over a local scene.
     if sd.get('camera',{}).get('geographic_target') and not intersects(bounds,{'coordinates':sd['camera']['geographic_target']}):
@@ -110,8 +137,8 @@ def focus(scene,media,presentation,allow_unverified=False):
     if not has_data:
         sd['layers']=[];sd['fallback']='No source weather layer available for '+names
         p['fallback_label']=sd['fallback'];p['map_has_layer']=False
-    p['credit'] += ' · '+names+' · Census 2024 boundaries'
-    return {'regions':wanted,'status':'regional_source_context' if has_data else 'missing_regional_weather',
+    p['credit'] += ' · '+names+' · Census 2024 boundaries'+(' · Also cited: '+cited_names if cited_names else '')
+    return {'regions':wanted,'cited_regions':cited,'status':'regional_source_context' if has_data else 'missing_regional_weather',
             'note':'Map extent matches the region. Layer intersection indicates regional context, not a measurement at every local point.',
             'cartography_checksum':catalogue()['source_checksum']}
 

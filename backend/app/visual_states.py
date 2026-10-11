@@ -123,14 +123,16 @@ def candidates(scene, advisory):
         rows += [('change_gauge', story, cue), ('comparison_split', story, cue), ('question_reveal', story, cue - 1)]
     if len(track) >= 2:
         rows.append(('advisory_timeline', story, 1))
-    places = geography.mentions(text)
+    # Places named only for another story the beat cites are that story's shots, not this one's.
+    cited = set(p.get('regional_cited_codes', []))
+    places = [m for m in geography.mentions(text) if not set(m['states']) <= cited]
     if places:
         # Spoken place names get their own shot at the beat where they are said.
         rows.append(('place_focus', '|'.join(dict.fromkeys(m['name'] for m in places)), 9))
     if p.get('county_shapes'):
         names = [s['name'].split(',')[0].strip() for s in p['county_shapes']]
         rows.append(('county_focus', story, 5 if any(re.search(r'(?<!\w)' + re.escape(n) + r'(?!\w)', text, re.I) for n in names) else 2))
-    spoken = geography.county_mentions(text, geography.story_states(p, advisory, text), geography.alert_codes(p, advisory))
+    spoken = geography.county_mentions(text, geography.story_states(p, advisory, text) - cited, geography.alert_codes(p, advisory))
     if spoken:
         # A county named in this beat is the most specific place on screen: it outranks its state.
         rows.append(('county_focus', 'spoken:' + ','.join(m['code'] for m in spoken), 10))
@@ -177,7 +179,8 @@ def apply(scene, state, key, advisory):
         direction['fallback'] = None;direction['headline'] = ' · '.join(names).upper()[:60]
         camera.update(start_zoom=1, end_zoom=1.06)
     elif state == 'county_focus':
-        text = scene['script_segment'];spoken = geography.county_mentions(text, geography.story_states(p, advisory, text), geography.alert_codes(p, advisory))
+        text = scene['script_segment'];states = geography.story_states(p, advisory, text) - set(p.get('regional_cited_codes', []))
+        spoken = geography.county_mentions(text, states, geography.alert_codes(p, advisory))
         shapes = p.get('county_shapes', [])
         if key.startswith('spoken:'):
             codes = key.split(':', 1)[1].split(',');have = {s['code'] for s in shapes}
