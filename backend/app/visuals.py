@@ -36,6 +36,9 @@ def source_url(url):
         return url
     if p.hostname=='www.nhc.noaa.gov' and re.fullmatch(r'/gis/forecast/archive/[a-z]{2}\d{6}_5day_\d{3}.kmz',p.path) and not p.query:
         return url
+    # Archived NEXRAD national composites (IEM) and their world files, for stories older than nowCOAST serves.
+    if p.hostname=='mesonet.agron.iastate.edu' and re.fullmatch(r'/archive/data/\d{4}/\d{2}/\d{2}/GIS/uscomp/n0[qr]_\d{12}\.(png|wld)',p.path) and not p.query:
+        return url
     if p.hostname=='nowcoast.noaa.gov' and p.path==urlsplit(RADAR_BASE).path:
         params=parse_qs(p.query,keep_blank_values=True)
         keys={'service','request','version','layers','styles','format','transparent','crs','bbox','width','height','time','layer'}

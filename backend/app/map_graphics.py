@@ -28,6 +28,10 @@ def geometry(image,parameters,bounds,t):
 
 def hud(draw,p,t):
     mode=p['map_mode'];color=COLORS[mode]
+    if mode=='radar' and p.get('map_observations'):
+        # Radar fills the picture; text needs its own backing to stay legible over the echo.
+        for box in ((45,98,560,146),(1405,98,1880,146),(45,250,720,384),(45,735,915,795)):
+            draw.rounded_rectangle(box,radius=10,fill='#061724')
     label(draw,(60,108),{'track':'OBSERVED / REPORTED','warnings':'SOURCE WARNING COVERAGE','radar':'OBSERVATIONS · NOT A FORECAST','forecast':'EXPECTED · NOT OBSERVED'}[mode],28,color)
     label(draw,(1420,108),p.get('map_source_label','SOURCE RECORD'),25,color)
     if mode=='forecast':label(draw,(1150,260),'Dots: reported centers, not future positions',23,color)

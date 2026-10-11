@@ -194,6 +194,19 @@ def map_base(bounds):
     return image
 
 
+@lru_cache(maxsize=16)
+def state_lines(bounds):
+    """Transparent overlay of the bundled Census state outlines inside a viewport."""
+    from .regional import catalogue
+    image=Image.new('RGBA',SIZE,(0,0,0,0));d=ImageDraw.Draw(image)
+    for region in catalogue()['regions']:
+        b=region['bounds']
+        if b[2]<bounds[0] or b[0]>bounds[2] or b[3]<bounds[1] or b[1]>bounds[3]:continue
+        for ring in region['rings']:
+            d.line([map_point(c,bounds) for c in ring],fill=(236,246,250,190),width=2)
+    return image
+
+
 @lru_cache(maxsize=24)
 def font(size):
     # macOS font is optional; bundled Pillow default is portable and deterministic.
@@ -287,9 +300,10 @@ class Composer:
             if source.observation_times and len(source.observation_times)!=getattr(im,'n_frames',1):
                 raise ValueError('Source timestamp count does not match decoded observation frames.')
             # Keep source frame order, including original timestamp and color legend.
-            frames=[]
+            # Map-registered radar keeps its transparency so the basemap shows where there is no echo.
+            frames=[];mode='RGBA' if parameters.get('radar_extent') else 'RGB'
             for n in range(getattr(im,'n_frames',1)):
-                im.seek(n);frames.append(im.convert('RGB').copy())
+                im.seek(n);frames.append(im.convert(mode).copy())
             self.sources.extend(frames)
         if parameters.get('map_legend'):
             legend=parameters['map_legend'];raw=load_asset(legend['id'])
@@ -312,7 +326,8 @@ class Composer:
                 if any(s.projection != 'EPSG:3857' for s in sd.sources if s.data_type == 'radar_reflectivity'):
                     raise ValueError('Map-registered radar requires Web Mercator source metadata.')
                 raster=register_raster(src,p['radar_extent'],self.bounds)
-                src=Image.alpha_composite(map_base(self.bounds).convert('RGBA'),raster).convert('RGB')
+                # State lines go over the echo so the place stays readable under widespread rain.
+                src=Image.alpha_composite(Image.alpha_composite(map_base(self.bounds).convert('RGBA'),raster),state_lines(self.bounds)).convert('RGB')
             crop=p.get('native_crop');main=src.crop(tuple(crop)) if crop else src
             main=ImageOps.fit(main,SIZE,centering=(x,y))
             w,h=1920/z,1080/z;cx=max(w/2,min(1920-w/2,x*1920));cy=max(h/2,min(1080-h/2,y*1080))

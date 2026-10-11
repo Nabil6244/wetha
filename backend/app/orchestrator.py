@@ -7,6 +7,7 @@ interrupted and Resume re-runs it, reusing the completed alignment and rendered 
 """
 import asyncio
 import copy
+import httpx
 from uuid import uuid4
 from .contracts import FootageExpansionRequest, TimelineRequest
 from .storage import now
@@ -141,8 +142,14 @@ class Orchestrator:
             if region:
                 try:
                     found.append(f"{len(await self.visuals.collect_radar_at(advisory.issued_at, region))} radar frames at {advisory.issued_at:%H:%M UTC}")
-                except (ValueError, KeyError) as error:
-                    problems.append('Radar: ' + str(error))
+                except (ValueError, KeyError, httpx.HTTPError) as error:
+                    # nowCOAST keeps only a few hours; older stories use the archived NEXRAD composites.
+                    from . import radar_archive
+                    try:
+                        found.append(f"{len(await radar_archive.collect(self.visuals, advisory.issued_at, region))} archived radar frames at {advisory.issued_at:%d %b %Y %H:%M UTC}")
+                    except (ValueError, KeyError, OSError, httpx.HTTPError) as archive_error:
+                        # Radar is optional evidence: a network or image failure leaves this story without it, not the video.
+                        problems.append(f'Radar: {error or error.__class__.__name__} Archive: {archive_error or archive_error.__class__.__name__}')
         try:
             await self.visuals.collect('goes')
         except ValueError as error:

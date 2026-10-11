@@ -46,7 +46,7 @@ def prepare(service, scene, advisory, source, radar_assets=None):
                 path=service.root/'observations'/(a['checksum']+'.image');path.write_bytes(row['body'])
                 p['map_observations'].append({**a,'filename':path.name})
                 asset_ids.append(a['id'])
-                sources.append(broadcast.VisualSource(**{**source.model_dump(),'data_type':'radar_reflectivity','source_url':a['source_url'],'checksum':a['checksum'],'observation_start':datetime.fromisoformat(a['observed_at']),'observation_end':datetime.fromisoformat(a['observed_at']),'projection':'EPSG:3857','coverage':'Regional NOAA radar context; event attribution unverified','attribution':'NOAA nowCOAST'}))
+                sources.append(broadcast.VisualSource(**{**source.model_dump(),'data_type':'radar_reflectivity','source_url':a['source_url'],'checksum':a['checksum'],'observation_start':datetime.fromisoformat(a['observed_at']),'observation_end':datetime.fromisoformat(a['observed_at']),'projection':'EPSG:3857','coverage':'Regional NOAA radar context; event attribution unverified','attribution':a['metadata'].get('attribution','NOAA nowCOAST')}))
             legend_id=assets[-1]['metadata'].get('legend_asset_id')
             if legend_id:
                 row=service.store.visual_asset(legend_id)
@@ -59,4 +59,7 @@ def prepare(service, scene, advisory, source, radar_assets=None):
     direction=broadcast.SceneDirection(scene_type='radar_animation' if mode=='radar' else 'region_focus' if mode in ('warnings','forecast') else 'storm_track',event_id=advisory.event_key,duration=scene['seconds'],headline=MODES[mode],layers=layers,sources=sources,asset_ids=asset_ids,fallback=fallback,camera=broadcast.Camera(movement='smooth_zoom_in',end_zoom=1.08))
     p['fallback_label']=fallback or '';p['map_has_layer']=not bool(fallback)
     p['credit']=advisory.provider+' · issue '+advisory.issued_at.isoformat()+' · Natural Earth'
+    if 'radar' in layers:
+        # The radar picture carries its own source on screen, not only in the report.
+        p['credit']+=' · Radar: '+' / '.join(dict.fromkeys(a['metadata'].get('attribution','NOAA nowCOAST') for a in p['map_observations']))
     return direction.model_dump(mode='json')

@@ -7,6 +7,7 @@ sector. Otherwise there is no option and the director picks another real visual.
 import copy
 import hashlib
 import io
+import math
 from datetime import datetime
 from uuid import uuid4
 from PIL import Image
@@ -51,19 +52,27 @@ def write_observation(service, asset):
 def radar_option(service, advisory, parameters, source):
     """Reuse the radar map scene with frames near the story time whose extent covers the story region."""
     from .map_scenes import prepare
-    region = story_bounds(parameters)
+    # The story's own geography: the region its frames were collected for (a scene's map may carry more).
+    own = getattr(service, 'story_geography', None)
+    region = (story_bounds({'geojson': own(advisory.id)}) if own else None) or story_bounds(parameters)
     if not region:
         return None
+    # Frames from the hour up to the story time only: radar observed after the story is not its evidence.
     candidates = [a for a in service.store.visual_assets('radar')
-                  if abs((datetime.fromisoformat(a['observed_at']) - advisory.issued_at).total_seconds()) <= RADAR_WINDOW
+                  if -RADAR_WINDOW <= (datetime.fromisoformat(a['observed_at']) - advisory.issued_at).total_seconds() <= 300
                   and a['metadata'].get('projection') == 'EPSG:3857' and intersects(a['metadata']['extent'], region)]
     if len(candidates) < 2:
         return None
-    # Prefer the tightest extent around the story (sharper close-ups), then most frames.
+    # Prefer an extent that holds the whole story region and is centred on it (another story's cached close-up
+    # may only clip this one), then the tightest extent, then most frames.
     extents = {}
     for a in candidates:
         extents.setdefault(tuple(a['metadata']['extent']), []).append(a)
-    best = min((e for e in extents if len(extents[e]) >= 2), key=lambda e: ((e[2] - e[0]) * (e[3] - e[1]), -len(extents[e])), default=None)
+    cx, cy = (region[0] + region[2]) / 2, (region[1] + region[3]) / 2
+    def rank(e):
+        holds = e[0] <= region[0] and e[1] <= region[1] and e[2] >= region[2] and e[3] >= region[3]
+        return (not holds, round(math.hypot((e[0] + e[2]) / 2 - cx, (e[1] + e[3]) / 2 - cy), 1), (e[2] - e[0]) * (e[3] - e[1]), -len(extents[e]))
+    best = min((e for e in extents if len(extents[e]) >= 2), key=rank, default=None)
     if best is None:
         return None
     scene = {'map_mode': 'radar', 'seconds': 4, 'parameters': copy.deepcopy(parameters)}
