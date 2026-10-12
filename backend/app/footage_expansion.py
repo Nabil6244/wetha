@@ -44,7 +44,7 @@ HAZARD_PHRASES={
     'winter':{'default':['snowstorm road','blizzard','ice storm']},
     'heat':{'default':['heat wave city','heat haze road']},
 }
-HAZARD_NOUN={'tropical_cyclone':'hurricane','flood':'flooding','tornado':'tornado','severe_storm':'storm','winter':'snowstorm','heat':'heat wave'}
+HAZARD_NOUN={'tropical_cyclone':'hurricane','flood':'flooding','tornado':'tornado','severe_storm':'storm','winter':'snowstorm','heat':'heat wave','high_wind':'high winds'}
 
 
 def story_regions(scope,advisory,names):
@@ -100,7 +100,7 @@ def needs(plan,store):
             # The story's hazard decides what the footage should look like, so a hurricane beat never searches "storm clouds" alone.
             phrases=[hazard[t] for t in topics if t in hazard] or [hazard['default'][(index+n)%len(hazard['default'])] for n in range(2)]
             for phrase in phrases[:2]:add(phrase,[],scene['id'])
-            if regions:add(' '.join(names[r] for r in regions[:2])+' '+HAZARD_NOUN[intent['hazard']],regions,scene['id'])
+            if regions:add(' '.join(names[r] for r in regions[:2])+' '+HAZARD_NOUN.get(intent['hazard'], 'weather'),regions,scene['id'])
         # Located evidence first; the beat's concrete visual searches follow.
         for query in concept_queries:add(query,[],scene['id'])
     # Search the biggest gaps first: needs shared by the most beats.

@@ -211,10 +211,13 @@ def state_lines(bounds):
 
 
 @lru_cache(maxsize=16)
-def map_context(bounds):
-    """Base map with state outlines and names, so a small warning area is always seen inside its state."""
+def map_context(bounds, names=True):
+    """Base map with state outlines and names, so a small warning area is always seen inside its state. Views that label
+    their own counties or places take the outlines without names, so no two labels are drawn over each other."""
     from .regional import catalogue
     image=map_base(bounds).copy();lines=state_lines(bounds);image.paste(lines,(0,0),lines);d=ImageDraw.Draw(image)
+    if not names:
+        return image
     width=bounds[2]-bounds[0]
     for region in catalogue()['regions']:
         b=region['bounds'];west,south,east,north=max(b[0],bounds[0]),max(b[1],bounds[1]),min(b[2],bounds[2]),min(b[3],bounds[3])
@@ -358,7 +361,7 @@ class Composer:
                 strip=src.crop(tuple(p['source_strip']));strip=ImageOps.contain(strip,tuple(p.get('strip_size',[830,150])))
                 image.paste(strip,(1920-strip.width-45,1080-strip.height-128))
         else:
-            image=map_context(self.bounds).copy(); d=ImageDraw.Draw(image)
+            image=map_context(self.bounds,p.get('visual_state') not in ('county_focus','place_focus')).copy(); d=ImageDraw.Draw(image)
             for region in p.get('regional_boundaries',[]):
                 for ring in region['rings']:
                     d.line([map_point(c,self.bounds) for c in ring],fill='#7ab8bd',width=3)

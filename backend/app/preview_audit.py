@@ -6,20 +6,70 @@ WORDS = dict(zip('zero one two three four five six seven eight nine ten eleven t
 
 def canonical(text):
     text = text.lower().replace('’', "'").replace('–','-')
+    # One spelling per value, so a source's "5000ft", "16.0 feet" or "447 AM" supports "5,000 feet", "16 feet", "4:47 a.m.".
+    text = re.sub(r'(?<=\d),(?=\d{3}(?!\d))', '', text)
+    # Clock times as NWS writes them: "4:47 a.m." -> "447 am", "9 p.m." -> "900 pm".
+    text = re.sub(r'(?<![\d:])(\d{1,2}):(\d{2})(?![\d:])', r'\1\2', text)
+    text = re.sub(r'(?<![\d.:])(\d{1,2})\s*([ap])\.?m\b\.?', r'\g<1>00 \2m', text)
+    text = re.sub(r'(?<![\d.])(\d+)\.0+(?![\d.])', r'\1', text)
     text = re.sub(r'\b(miles per hour|mph)\b', 'mph', text)
     text = re.sub(r'\bnautical miles?\b', 'nm', text)
     text = re.sub(r'\bfeet\b','ft',text)
     text = re.sub(r'\binches\b','in',text)
     text = re.sub(r'\b('+'|'.join(WORDS)+r')\b',lambda m:str(WORDS[m[0]]),text)
     text = re.sub(r'\b([2-9]0)[ -]([1-9])\b',lambda m:str(int(m[1])+int(m[2])),text)
+    text = re.sub(r'\b(\d+)[ -]and[ -]a[ -]half\b', r'\1.5', text)  # "four-and-a-half-mile" is the source's "4.5 mile".
     return re.sub(r'\s+',' ',text)
 
 def numeric_tokens(text):
     return set(re.findall(r'(?<!\w)\d+(?:\.\d+)?',canonical(text)))
 
+MONTH_DAYS = re.compile(r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:\s*(?:,|and|to|through|-)\s*(\d{1,2})(?!\d))?(?:\s*,?\s*(\d{4}))?')
+
+
+def calendar_values(text):
+    """Day and year numbers that are part of a written date ("October 11 and 12, 2026")."""
+    return {v for m in MONTH_DAYS.finditer(canonical(text)) for v in m.groups() if v}
+
+
+def source_dates(sources):
+    """Days and years a script's own alerts were issued or expire, or that their texts write as dates."""
+    values = set()
+    for a in sources:
+        for stamp in (getattr(a, 'issued_at', None), getattr(a, 'expires_at', None)):
+            if stamp:values |= {str(stamp.day), str(stamp.year)}
+        values |= calendar_values(a.text)
+    return values
+
+
+def measured_inches(text):
+    """Values the narration itself gives in inches; any other "54 in" is a preposition ("State Road 54 in Worthington")."""
+    return set(re.findall(r'(\d+(?:\.\d+)?)\s*(?:-|to|and)?\s*(?:\d+(?:\.\d+)?\s*)?inch', re.sub(r'(?<=\d),(?=\d{3})', '', text.lower()))) | \
+           set(re.findall(r'(\d+(?:\.\d+)?)\s*(?:-|to|and)\s*\d+(?:\.\d+)?\s*inch', text.lower()))
+
+def stamps(advisory):
+    """An alert's own issue/expiry times as text the narration can cite: ISO, plus "0607" for "06:07 UTC"."""
+    times = [t for t in (getattr(advisory, 'issued_at', None), getattr(advisory, 'expires_at', None)) if t]
+    return ' '.join(f"{t.isoformat()} {t:%H%M}" for t in times)
+
+
+CITED_ADVISORY = re.compile(r'advisory issued at (\d{1,2}):(\d{2}) utc on ([a-z]+ \d{1,2}, \d{4})')
+
+
+def cited(text, evidence):
+    """Declared sources a sentence names by issue time ("Compared with the advisory issued at 15:00 UTC on October 09, 2026")."""
+    found = []
+    for hour, minute, day in CITED_ADVISORY.findall(text.lower()):
+        for a in evidence:
+            t = a.issued_at
+            if (t.hour, t.minute) == (int(hour), int(minute)) and t.strftime('%B %d, %Y').lower() == day:
+                found.append(a)
+    return found
+
+
 def audit(document, evidence):
     selected = set(document.get('selected_advisory_ids', [document['advisory_id']]))
-    sources = [a for a in evidence if a.id in selected]
+    sources = [a for a in evidence if a.id in selected];selected_sources = list(sources)
     # Externally refined bulletins often use fewer stories than the raw source pack.
     # Prefer preserved reports whose distinctive affected places occur in the narration.
     generic={'coastal','waters','county','counties','sound','beach','out','portions','parts','north','south','east','west','gulf','florida','alabama','georgia','mississippi'}
@@ -52,16 +102,38 @@ def audit(document, evidence):
         multi=sum(bool(wanted&chapter_words[a.id]) for a in sources)>1 and any(w in text.lower() for w in ('across','along','offshore','reports','bulletin'))
         if multi:identities=[a.id for _,a in ranked if wanted&chapter_words[a.id]]
         matching=[a for a in sources if a.id in identities]
-        combined=' '.join(a.text+' '+a.issued_at.isoformat() for a in matching)
+        matching+=[a for a in cited(text, evidence) if a not in matching]
+        combined=' '.join(a.text+' '+stamps(a) for a in matching)
         unsupported=sorted(numeric_tokens(text)-numeric_tokens(combined))
+        if unsupported:
+            # The chosen story lacks these numbers: use the related selected story that states every one of them.
+            spoken=numeric_tokens(text)
+            # Any of the script's selected stories, including one whose area name the narration never says (a river warning
+            # filed under its county): it must share the paragraph's wording and state every number.
+            overlap=lambda a:len(wanted&terms(a.text+' '+a.title+' '+a.area))
+            covering=sorted((a for a in selected_sources if a.id not in identities and overlap(a)>=3
+                             and spoken<=numeric_tokens(a.text+' '+stamps(a))), key=lambda a:-overlap(a))
+            if covering:
+                best=covering[0];identities=[best.id];matching=[best];context=best.id
+                combined=best.text+' '+stamps(best)
+                unsupported=sorted(spoken-numeric_tokens(combined))
+        # A written date is supported when it is one of this script's own alerts' issue or expiry dates.
+        dates=calendar_values(text)&source_dates(sources)
+        unsupported=[n for n in unsupported if n not in dates]
         # A date contextualising the package is not a weather measurement.
         if re.search(r'\b(expired|dated|not current)\b',text.lower()):
             unsupported=[n for n in unsupported if n not in numeric_tokens(' '.join(a.issued_at.isoformat() for a in sources))]
         conflicts=[]
+        inches=measured_inches(text)
         for low,high,unit in re.findall(r'(\d+)\s*(?:to|-)\s*(\d+)\s*(mph|knots|ft|in|mb|nm)\b',canonical(text)):
+            if unit=='in' and high not in inches:continue
+            if re.search(r'\bfrom\s+'+low+r'\s*(?:to|-)\s*'+high, canonical(text)):
+                # "changed from 979 to 975 mb" compares two advisories: each value must appear in one of them.
+                if all(any(re.search(r'\b'+v+r'\s*'+unit+r'\b', canonical(a.text)) for a in matching) for v in (low, high)):continue
             if not any(re.search(r'\b'+low+r'\s*(?:to|and|-)\s*'+high+r'\s*'+unit+r'\b',canonical(a.text)) for a in matching):
                 conflicts.append(f'{low}–{high} {unit}')
         for value,unit in re.findall(r'(\d+(?:\.\d+)?)\s*(mph|knots|ft|in|mb|nm)\b',canonical(text)):
+            if unit=='in' and value not in inches:continue
             if not any(re.search(r'\b'+re.escape(value)+r'\s*'+unit+r'\b',canonical(a.text)) for a in matching):
                 conflicts.append(f'{value} {unit}')
         if re.search(r'\b(guaranteed|certain to|definitely will)\b',text.lower()):conflicts.append('Forecast certainty is not supported by source wording')

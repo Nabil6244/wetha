@@ -39,6 +39,7 @@ HAZARDS = [
     ('tropical_cyclone', r'\b(hurricane|tropical (?:storm|depression|cyclone)|typhoon|cyclone|eyewall)\b'),
     ('tornado', r'\b(tornado\w*|twister|supercell)\b'),
     ('severe_storm', r'\b(severe thunderstorm\w*|thunderstorm\w*|hail\w*|damaging winds?|lightning)\b'),
+    ('high_wind', r'\b(high winds?|wind (?:advisory|warning)|crosswinds?|blowing dust|dust storms?|lake wind)\b'),  # Not "damaging winds": a severe storm.
     ('flood', r'\b(flood\w*|surge|inundat\w*)\b'),
     ('winter', r'\b(snow\w*|blizzard\w*|ice storm|freezing rain|sleet|winter storm|winter weather)\b'),  # Alert titles name the hazard.
     ('heat', r'\b(heat\w*|record high|hot)\b'),
@@ -59,6 +60,10 @@ EVIDENCE = {
 }
 
 
+# Capitalised names of landforms and waterways ("Snowy Range", "Thunder Basin", "Flood Creek"): never a hazard on their own.
+PLACE_NAME = re.compile(r'\b(?:[A-Z][a-z]+ ){1,2}(?:Range|Mountains?|Foothills|Creek|River|Basin|Lake|Peaks?|Pass|Canyons?|Valley|Bay|Island|Plateau|Hills|Butte|Mesa)\b')
+
+
 def classify(text, story_text=''):
     """Primary intent, secondary intents, hazard and wanted footage class for one beat of narration."""
     hits = []
@@ -70,7 +75,8 @@ def classify(text, story_text=''):
     order = {name: i for i, (name, *_rest) in enumerate(INTENTS)}
     # Generic framing ("in effect", "could") never outranks a specific hazard or event in the same beat.
     hits.sort(key=lambda h: (h[1] in GENERIC, -h[0], order[h[1]]))
-    hazard = next((name for name, pattern in HAZARDS if re.search(pattern, text, re.I)), None) \
+    spoken = PLACE_NAME.sub(' ', text)  # "North Snowy Range Foothills" is a place, not snow.
+    hazard = next((name for name, pattern in HAZARDS if re.search(pattern, spoken, re.I)), None) \
         or next((name for name, pattern in HAZARDS if re.search(pattern, story_text or '', re.I)), 'general')
     if not hits:
         return {'intent': 'context', 'secondary': [], 'hazard': hazard, 'preferred': ['place_focus', 'satellite_loop', 'radar_loop', 'wide', 'pan'],

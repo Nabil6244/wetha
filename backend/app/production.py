@@ -127,6 +127,9 @@ class Production:
         (self.root / 'media').mkdir(parents=True, exist_ok=True)
         (self.root / 'renders').mkdir(exist_ok=True)
         (self.root / 'observations').mkdir(exist_ok=True)
+        # The editor's own footage: copy videos here, then Import from folder registers them through the normal import.
+        self.manual_folder = store.path.parent / 'manual-footage' / 'inbox'
+        self.manual_folder.mkdir(parents=True, exist_ok=True)
         self.tasks = {}
         self.serial = asyncio.Semaphore(1)
         self.imports = asyncio.Lock()
@@ -160,6 +163,7 @@ class Production:
                 'hour_graphics': self.hour_graphics_info(), 'documentary': self.documentary_info(),
                 'regional_chapter': self.regional_chapter_info(),
                 'forecast_news': self.forecast_news_info(), 'user_report': self.user_report_info(),
+                'manual_footage_folder': str(self.manual_folder),
                 'regions': regional.options(), 'regional_coverage': regional.coverage(self.store.visual_plans(), self.store.production_list('media'))}
 
     def user_report_info(self):
@@ -298,6 +302,41 @@ class Production:
         if not path.is_file() or checksum(path) != document['checksum']:
             raise ValueError('Imported media is missing or its checksum changed. Import the original file again.')
         return path
+
+    async def import_folder(self):
+        """Register supported videos copied into the manual footage folder. Each goes through the normal import (decode check,
+        shot and black/frozen-range analysis); a file already in the library keeps its record untouched. Files are never moved or deleted."""
+        from .contracts import MediaImportMetadata
+        known = {m['checksum']: m for m in self.store.production_list('media')}
+        rows = []
+        for path in sorted(p for p in self.manual_folder.iterdir() if p.is_file() and not p.name.startswith('.')):
+            row = {'file': path.name}
+            if path.suffix.lower() not in EXTENSIONS['video']:
+                rows.append({**row, 'status': 'skipped', 'message': 'Not a supported video. Use MP4, MOV, MKV or WebM.'});continue
+            stat = path.stat()
+            if time.time() - stat.st_mtime < 3:
+                rows.append({**row, 'status': 'waiting', 'message': 'Still being copied. Refresh again in a moment.'});continue
+            if stat.st_size > MAX_UPLOAD:
+                rows.append({**row, 'status': 'failed', 'message': 'Larger than 250 MiB. Trim or compress it, then refresh.'});continue
+            digest = await asyncio.to_thread(checksum, path)
+            if digest in known:
+                rows.append({**row, 'status': 'duplicate', 'media_id': known[digest]['id'],
+                             'message': f"Already in the library as “{known[digest]['name']}”; its details were kept."});continue
+            name = re.sub(r'[^\w.\- ]+', '_', path.stem)[:170] + path.suffix.lower()
+            metadata = MediaImportMetadata(name=name, kind='video', context='illustrative', source_provider='local', rights_confirmed=True,
+                                           license='Supplied by the editor through the local footage folder; rights confirmed on import',
+                                           attribution='Local footage folder', source='local-folder:' + name)
+            async def chunks(source=path):
+                with source.open('rb') as handle:
+                    while block := await asyncio.to_thread(handle.read, 1 << 20):
+                        yield block
+            try:
+                document = await self.import_media(metadata, chunks())
+            except ValueError as error:
+                rows.append({**row, 'status': 'failed', 'message': str(error)});continue
+            known[document['checksum']] = document
+            rows.append({**row, 'status': 'duplicate' if document.get('duplicate') else 'added', 'media_id': document['id']})
+        return {'folder': str(self.manual_folder), 'results': rows, 'added': sum(r['status'] == 'added' for r in rows)}
 
     async def import_media(self, metadata, stream):
         async with self.imports:

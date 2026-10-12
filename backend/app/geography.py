@@ -220,19 +220,26 @@ def draw_counties(image, shapes, bounds, t, warning=None, spoken=None):
                 d.line(points + [points[0]], fill=(255, 200, 135, 255), width=5)
     image.paste(Image.alpha_composite(image.convert('RGBA'), layer).convert('RGB'))
     draw = ImageDraw.Draw(image);seen = set()
-    # Spoken counties are labelled last (on top) and larger, once they have lit up.
-    for name, x, y, lit, named, full in sorted(centres, key=lambda c: c[4]):
-        if name in seen or not (40 < x < 1800 and 100 < y < 950) or (named and lit < .3):
-            continue
-        seen.add(name)
-        if named:
-            text = full.upper()
-            draw.rectangle((x - 13 * len(text) - 12, y - 24, x + 13 * len(text) + 12, y + 30), fill='#061724')
-            label(draw, (x - 13 * len(text), y - 20), text, 44, '#ffffff')
-        else:
-            label(draw, (x - 9 * len(name), y - 16), name.upper(), 30, '#ffffff')
+    from .broadcast import font
     census = any(s.get('source') == 'census' for s in shapes);zones = any(s.get('source') != 'census' for s in shapes)
     title = 'COUNTY OUTLINES · US CENSUS 2024' if census and not zones else 'WARNED AREAS · NWS ZONE + CENSUS OUTLINES' if census else 'WARNED AREAS · NWS ZONE OUTLINES'
+    # Boxes already taken: the title, and the location caption and legend along the bottom. A label never overlaps another.
+    taken = [(55, 120, 80 + 19 * len(title), 176), (40, 880, 1880, 960)]
+    def free(box):
+        return all(box[2] < a or box[0] > c or box[3] < b or box[1] > d for a, b, c, d in taken)
+    # Spoken counties claim their place first and larger, once they have lit up; other names fill the space that is left.
+    for name, x, y, lit, named, full in sorted(centres, key=lambda c: not c[4]):
+        if name in seen or (named and lit < .3):
+            continue
+        text = full.upper() if named else name.upper();size = 44 if named else 30
+        width = draw.textlength(text, font=font(size))
+        box = (x - width / 2 - 12, y - size * .55 - 4, x + width / 2 + 12, y + size * .7 + 4)
+        if box[0] < 20 or box[2] > 1900 or box[1] < 100 or box[3] > 1060 or not free(box):
+            continue
+        seen.add(name);taken.append(box)
+        if named:
+            draw.rectangle(box, fill='#061724')
+        label(draw, (x - width / 2, y - size * .45), text, size, '#ffffff')
     draw.rectangle((55, 120, 80 + 19 * len(title), 176), fill='#061724')
     label(draw, (80, 130), title, 30, '#82efdc')
     if warning:

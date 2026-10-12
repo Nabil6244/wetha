@@ -36,7 +36,8 @@ def draft(timeline, media, advisory_lookup, unavailable=()):
                     choice=start=None
                     for c in varied:
                         asset=by_id[c['media_id']]
-                        if asset['kind']!='video' or cursor-proposed_ends.get(c['media_id'],-9999)<120:continue
+                        # Each recording appears once per video; with nothing new that fits, the beat keeps its graphic.
+                        if asset['kind']!='video' or proposed_uses.get(c['media_id'],0):continue
                         # Start on a clean camera shot inside the unused part of the recording.
                         start=footage_library.place(asset,proposed_offsets.get(c['media_id'],c['trim_start']),seconds)
                         if start is not None:
@@ -69,4 +70,4 @@ def draft(timeline, media, advisory_lookup, unavailable=()):
             'footage_needs':[{**g,'seconds':round(g['seconds'],1)} for g in gaps.values()],
             'excluded_footage':media_selection.unique(excluded),
             'coverage':{'footage_clips':clip_count,'footage_seconds':round(footage_seconds,1),'footage_fraction':round(ratio,3),'short_beats_without_footage':short_beats},
-            'note':'Draft only. Review source relevance and visual variety. Cuts are 2.5–5 seconds; beats under 2.5 seconds keep their graphic; source ranges do not overlap and each recording has a two-minute reuse gap.'}
+            'note':'Draft only. Review source relevance and visual variety. Cuts are 2.5–5 seconds; beats under 2.5 seconds keep their graphic; each recording is used at most once per video; beats with no fitting unused clip keep their graphic.'}

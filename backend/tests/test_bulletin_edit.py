@@ -17,7 +17,10 @@ def test_mixed_draft_preserves_audio_duration_and_uses_distinct_ranges_with_cool
     timeline={'scenes':scenes()}
     source=lambda _:SimpleNamespace(event_key='test')
     result=draft(timeline,assets(),source)
-    assert result['coverage']['footage_fraction']>=.3
+    # 20 clips, each used once (two cuts per footage beat): about a quarter of the program; the rest keeps graphics.
+    assert result['coverage']['footage_fraction']>=.2
+    used=[c['media_id'] for s in result['scenes'] for c in s['cuts']]
+    assert used and len(used)==len(set(used))
     assert result['seconds']==280
     assert [s['id'] for s in result['scenes']]==[s['id'] for s in timeline['scenes']]
     ranges={};last={};cursor=0

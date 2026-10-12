@@ -51,9 +51,11 @@ def test_same_hazard_footage_from_a_comparable_region_is_a_labelled_fallback():
     ranked = media_selection.rank(beat('Heavy rain flooded roads across Alabama.'), [florida, SNOW_PLOW], flood, limit=None, allow_unverified=True)
     assert [r['media_id'] for r in ranked] == ['florida']
     assert ranked[0]['location_status'] == 'nearby' and 'Filmed in Bradenton, Florida' in ranked[0]['reasons'][0]
-    # Related hazards show the same thing: hurricane flooding may illustrate a flood beat.
+    # Hurricane surge flooding illustrates coastal flooding only, never a flash flood or a river rising inland.
     surge = clip('surge', ['flood', 'waves'], name='hurricane surge flooding.mp4')
-    assert [r['media_id'] for r in media_selection.rank(beat('Flooding covered streets.'), [surge], flood, limit=None, allow_unverified=True)] == ['surge']
+    coastal = story('Coastal Flood Warning')
+    assert [r['media_id'] for r in media_selection.rank(beat('Flooding covered streets.'), [surge], coastal, limit=None, allow_unverified=True)] == ['surge']
+    assert media_selection.rank(beat('Flooding covered streets.'), [surge], flood, limit=None, allow_unverified=True) == []
 
 
 def test_when_no_footage_fits_the_beat_keeps_its_map_or_graphic():
@@ -83,7 +85,7 @@ def test_hazard_footage_outranks_neutral_weather_and_tropical_rain_stays_off_ice
     hail = clip('hail', ['hail', 'wind'])
     palms = clip('palms', ['wind'], name='swaying palms.mp4')
     ranked = media_selection.rank(beat('Large hail and damaging winds hit Kansas.'), [palms, hail], severe, limit=None, allow_unverified=True)
-    assert [r['media_id'] for r in ranked][0] == 'hail' and ranked[0]['score'] > ranked[-1]['score']
+    assert [r['media_id'] for r in ranked] == ['hail']   # palms are a tropical setting: excluded outside tropical states
 
 
 def test_specific_hazard_footage_outranks_same_category_and_generic_storm_footage():

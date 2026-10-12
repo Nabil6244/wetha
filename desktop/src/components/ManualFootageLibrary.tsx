@@ -97,9 +97,14 @@ function ClipCard({clip, regions, busy, run}: {clip: Clip; regions: {code: strin
   </div>;
 }
 
-export default function ManualFootageLibrary({media, regions, maxBytes, reload}: {
-  media: Clip[]; regions: {code: string; name: string}[]; maxBytes: number; reload: () => Promise<void>;
+interface FolderRow {file: string; status: 'added' | 'duplicate' | 'skipped' | 'waiting' | 'failed'; message?: string}
+
+export default function ManualFootageLibrary({media, regions, maxBytes, folder, reload}: {
+  media: Clip[]; regions: {code: string; name: string}[]; maxBytes: number; folder?: string; reload: () => Promise<void>;
 }) {
+  const [folderRights, setFolderRights] = useState(false);
+  const [folderRows, setFolderRows] = useState<FolderRow[]>([]);
+  const [copied, setCopied] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [category, setCategory] = useState('');
@@ -123,6 +128,15 @@ export default function ManualFootageLibrary({media, regions, maxBytes, reload}:
   function run(label: string, task: () => Promise<void>) {
     setBusy(true);setError('');
     void task().then(reload).catch(e => setError(`${label}: ${e instanceof Error ? e.message : String(e)}`)).finally(() => setBusy(false));
+  }
+
+  async function importFolder() {
+    // Registers videos copied into the footage folder through the same import and checks as an upload; files stay where they are.
+    const response = await fetch('/api/production/media/folder-import', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rights_confirmed: folderRights}), signal: AbortSignal.timeout(3600000)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Folder import failed');
+    setFolderRows(result.results);
   }
 
   async function uploadAll() {
@@ -157,6 +171,14 @@ export default function ManualFootageLibrary({media, regions, maxBytes, reload}:
   return <section className="panel" aria-label="Footage library">
     <div className="panel-header"><h2>Footage library</h2><span className="pill">{media.filter(m => m.kind === 'video' && !m.quarantined).length} clips · kept in the app's data folder</span></div>
     <div className="detail-body">
+      {folder && <div className="production-fields" aria-label="Footage folder">
+        <p className="span-two">Add your own weather videos by copying them into this folder, then choose Import from folder. MP4, MOV, MKV or WebM, up to {Math.round(maxBytes / 1048576)} MiB each. Files stay in the folder; each new video is checked and added once. Then set its category and location below so it can be used.</p>
+        <label className="span-two">FOOTAGE FOLDER<input aria-label="Footage folder path" readOnly value={folder} onFocus={e => e.target.select()}/></label>
+        <button type="button" className="button" onClick={() => {void navigator.clipboard.writeText(folder).then(() => {setCopied(true); window.setTimeout(() => setCopied(false), 2000);});}}>{copied ? 'Copied' : 'Copy folder path'}</button>
+        <label><input type="checkbox" checked={folderRights} onChange={e => setFolderRights(e.target.checked)}/> I have the right to use the videos in this folder</label>
+        <button type="button" className="button" disabled={busy || !folderRights} onClick={() => run('Import from folder', importFolder)}>Import from folder</button>
+        {folderRows.length > 0 && <ul className="span-two" aria-label="Folder import results">{folderRows.map(r => <li key={r.file}>{r.file} · {r.status}{r.message ? ` · ${r.message}` : ''}</li>)}</ul>}
+      </div>}
       <form className="production-fields" onSubmit={e => {e.preventDefault(); if (!files.length) {setError('Choose one or more video files.'); return;} void uploadAll();}}>
         <label className="span-two">VIDEO FILES<input aria-label="Footage files" type="file" multiple accept=".mp4,.mov,.mkv,.webm" onChange={e => setFiles(Array.from(e.target.files ?? []))}/></label>
         <label>CATEGORY<select aria-label="Upload category" value={category} onChange={e => setCategory(e.target.value)}><option value="">Choose a category</option>{Object.keys(CATEGORIES).map(c => <option key={c}>{c}</option>)}</select></label>

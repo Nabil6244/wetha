@@ -4,7 +4,7 @@ import re
 from . import regional
 
 GROUPS = {
-    'wind': ('wind', 'winds', 'gust', 'gusts', 'windy'),
+    'wind': ('wind', 'winds', 'gust', 'gusts', 'windy', 'crosswind', 'crosswinds', 'windblown'),
     'rain': ('rain', 'rainfall', 'raining', 'downpour', 'precipitation'),
     'flood': ('flood', 'floods', 'flooding', 'inundation'),
     'waves': ('wave', 'waves', 'sea', 'seas', 'surf', 'surge'),  # Not 'coast': place names (Gulf Coast) and calm beach shots are not waves.
@@ -64,46 +64,119 @@ CLIP_HAZARD_TOPICS = {'tornado': 'tornado', 'hail': 'severe_storm', 'lightning':
                       'snow': 'winter', 'ice': 'winter', 'wildfire': 'wildfire', 'heat': 'heat', 'drought': 'heat', 'cold': 'cold'}
 TROPICAL = re.compile(r'\b(hurricane|tropical (?:storm|depression|cyclone)|typhoon|cyclone|eyewall)\b|\b(?:al|ep|cp)\d{6}\b', re.I)
 SURGE = re.compile(r'\bsurge\b', re.I)
-# Hazards that show the same thing on screen: hurricane flooding is flooding, a supercell is a severe storm.
-RELATED = {'tropical_cyclone': {'flood'}, 'flood': {'tropical_cyclone'}, 'tornado': {'severe_storm'}, 'severe_storm': {'tornado'},
-           'winter': {'cold'}, 'cold': {'winter'}}
-# Weather a clip without a named hazard may show on a beat of each hazard. Rough seas are not a snowstorm.
-COMPATIBLE = {'tropical_cyclone': {'storm', 'waves', 'wind', 'rain', 'flood', 'sky'}, 'flood': {'flood', 'rain', 'storm', 'waves'},
+# Hazards that show the same thing on screen. Flooding is split by kind: a river rising inland is not storm surge.
+RELATED = {'tropical_cyclone': {'coastal_flood', 'flood'}, 'coastal_flood': {'tropical_cyclone', 'flood'},
+           'river_flood': {'flood'}, 'flash_flood': {'flood', 'river_flood'}, 'flood': {'river_flood', 'flash_flood'},
+           'tornado': {'severe_storm'}, 'severe_storm': {'tornado'}, 'winter': {'cold'}, 'cold': {'winter'}, 'high_wind': set()}
+# Weather a clip without a named hazard may show on a beat of each hazard. Rough seas are not a snowstorm or a river flood.
+COMPATIBLE = {'tropical_cyclone': {'storm', 'waves', 'wind', 'rain', 'flood', 'sky'},
+              'coastal_flood': {'flood', 'waves', 'wind', 'rain', 'storm', 'sky'},
+              'river_flood': {'flood', 'rain'}, 'flash_flood': {'flood', 'rain', 'storm', 'sky'}, 'flood': {'flood', 'rain', 'storm'},
               'tornado': {'storm', 'wind', 'sky', 'lightning', 'hail', 'rain'}, 'severe_storm': {'storm', 'wind', 'sky', 'lightning', 'hail', 'rain'},
+              'high_wind': {'wind', 'sky', 'drought'},
               'winter': {'snow', 'ice', 'cold', 'wind', 'sky'}, 'cold': {'cold', 'ice', 'snow', 'sky', 'wind'},
               'heat': {'heat', 'drought', 'sky'}, 'wildfire': {'wildfire', 'drought', 'heat', 'wind', 'sky'}}
 PHENOMENA = SHOT_CLASSES['phenomenon'] | {'flood', 'sky'}
 # Topics that name one hazard precisely; generic weather words (storm, wind, rain, sky) do not.
 SPECIFIC_HAZARDS = {'hail', 'ice', 'snow', 'tornado', 'flood', 'wildfire', 'drought', 'heat', 'lightning', 'cold'}
 GENERIC_WEATHER = {'storm', 'wind', 'rain', 'sky'}
+# Kinds of flooding, from words the beat, the alert or the clip's own metadata use.
+COASTAL = re.compile(r'\b(storm surge|surge|coastal flood\w*|tides?|tidal|seawalls?|ocean|sea|seas|beach\w*|waves?|shore\w*|coast)\b', re.I)
+FLASH = re.compile(r'\b(flash flood\w*|burn scars?|debris flows?|arroyos?|dry wash\w*|washes|slot canyons?|mudslides?|mud flows?|desert)\b', re.I)
+RIVER = re.compile(r'\b(rivers?|creeks?|streams?|bayous?|river stage|flood stage|crest\w*|gauges?)\b', re.I)
+TROPICAL_SETTING = re.compile(r'\b(palms?|palm trees?|coconut|tropical)\b', re.I)
+TROPICAL_STATES = {'FL', 'HI', 'PR', 'VI', 'GU', 'AS', 'MP'}
+# Disaster aftermath on screen. It needs a damage beat and damage the story itself reports as having happened.
+AFTERMATH = re.compile(r'\b(destroyed|destruction|aftermath|wreckage|collapsed|rubble|demolished|devastat\w*|flattened|debris (?:field|clearance|removal)|'
+                       r'road.clearance|temporary.roofs?|blue tarps?)\b', re.I)
+OBSERVED_DAMAGE = re.compile(r'\b(damage (?:was |has been |had been )?reported|reports? of (?:damage|destroyed|collapsed|structural)|(?:was|were|has been|have been|had been) '
+                             r'(?:damaged|destroyed|flattened|swept away|washed away)|caused (?:extensive |major |significant |severe )?damage|'
+                             r'damage (?:left|forced|closed|cut)|left (?:\w+ ){0,2}(?:damage|destruction)|major flooding is (?:occurring|ongoing)|catastrophic|devastat\w+)\b'
+                             # A past-tense verb ("winds damaged homes"), never a forecast ("will be damaged or destroyed").
+                             r'|(?<!will be )(?<!could be )(?<!may be )(?<!can be )(?<!would be )(?<!be )(?<!damaged or )(?<!damaged and )\b(?:damaged|destroyed|flattened|toppled)\b(?! or destroyed)', re.I)
+# Response or context footage that names no hazard may stand in only where its subject fits: downed lines after wind or ice.
+CONCEPT_FITS = {'power': {'tropical_cyclone', 'high_wind', 'severe_storm', 'tornado', 'winter', 'cold'}}
+NEUTRAL_CONCEPTS = {'traffic', 'residents', 'preparedness'}
+
+
+HAZARD_TOPICS = {'river_flood': {'flood'}, 'flash_flood': {'flood'}, 'coastal_flood': {'flood', 'waves'}, 'flood': {'flood'},
+                 'tropical_cyclone': {'storm'}, 'high_wind': {'wind'}, 'winter': {'snow'}, 'cold': {'cold'}, 'tornado': {'tornado'},
+                 'severe_storm': {'lightning', 'hail'}, 'wildfire': {'wildfire'}, 'heat': {'heat'}}
+
+
+def flood_kind(text, order=('coastal_flood', 'flash_flood', 'river_flood')):
+    patterns = {'coastal_flood': COASTAL, 'flash_flood': FLASH, 'river_flood': RIVER}
+    return next((kind for kind in order if patterns[kind].search(text)), None)
+
+
+def beat_hazard(scene, advisory, hazard):
+    """A flood beat's kind of flooding: its own words first, then the alert's title, then the alert's text
+    (where a river gauge outranks a passing mention of tides). Other hazards are unchanged."""
+    if hazard != 'flood':
+        return hazard
+    title = str(getattr(advisory, 'title', '') or '')
+    return (flood_kind(scene.get('script_segment', '')) or flood_kind(title, ('coastal_flood', 'flash_flood'))
+            or flood_kind(str(getattr(advisory, 'text', '') or '')[:4000], ('river_flood', 'flash_flood', 'coastal_flood')) or 'flood')
 
 
 def clip_hazards(asset, tags):
-    """Hazards a clip's own metadata names: hazard tags, hurricane words or a tropical event ID in its name, slug or catalogue."""
+    """Hazards a clip's own metadata names: hazard tags, hurricane words or a tropical event ID, and the kind of flooding shown."""
     from .geo_gate import metadata_text
     text = metadata_text(asset) + ' ' + (asset.get('catalog', {}).get('event_id') or '')
     found = {CLIP_HAZARD_TOPICS[t] for t in tags if t in CLIP_HAZARD_TOPICS}
     if TROPICAL.search(text):
         found.add('tropical_cyclone')
-    if SURGE.search(text):
-        found.add('flood')
+    if 'flood' in found or SURGE.search(text):
+        # One kind per clip: surge on a seawall is coastal, a muddy creek is a river, a desert wash is a flash flood.
+        found.discard('flood')
+        found.add(flood_kind(text) or 'flood')
     return found
 
 
-def hazard_fit(beat_hazard, asset, tags):
-    """(allowed, reason). The clip must show the beat's own hazard, a related one, or hazard-neutral weather that fits it."""
+def story_regions(scene, advisory):
+    codes = set(regional.targets(scene)) | set(re.findall(r',\s*([A-Z]{2})\b', str(getattr(advisory, 'area', '') or '')))
+    return codes | set(regional.named_regions(str(getattr(advisory, 'area', '') or '')))
+
+
+def hazard_fit(beat_hazard, asset, tags, scene=None, advisory=None):
+    """(allowed, reason). The clip must show the beat's own hazard, a related one, or hazard-neutral content its metadata shows fits."""
     if beat_hazard not in COMPATIBLE:
         return True, ''
+    label = beat_hazard.replace('_', ' ')
+    from .geo_gate import metadata_text
+    if TROPICAL_SETTING.search(metadata_text(asset)) and beat_hazard not in ('tropical_cyclone', 'coastal_flood') \
+            and not (scene is not None and story_regions(scene, advisory) & TROPICAL_STATES):
+        return False, f'Shows a tropical setting (palms), which does not fit a {label} story outside tropical states'
     named = clip_hazards(asset, tags)
     if named:
         if beat_hazard in named or named & RELATED.get(beat_hazard, set()):
             return True, ''
-        return False, f"Shows {', '.join(sorted(h.replace('_', ' ') for h in named))}, not the {beat_hazard.replace('_', ' ')} this beat reports"
+        return False, f"Shows {', '.join(sorted(h.replace('_', ' ') for h in named))}, not the {label} this beat reports"
     weather = tags & PHENOMENA
     if weather - COMPATIBLE[beat_hazard]:
         # Every kind of weather on screen must fit: rough seas with wind are still not a snowstorm.
-        return False, f"Shows {', '.join(sorted(weather - COMPATIBLE[beat_hazard]))}, which does not fit a {beat_hazard.replace('_', ' ')} beat"
-    # Damage, outage or response footage that names no hazard at all is not a different hazard; it still needs a topic match.
+        return False, f"Shows {', '.join(sorted(weather - COMPATIBLE[beat_hazard]))}, which does not fit a {label} beat"
+    if weather:
+        return True, ''
+    # No hazard and no weather in its metadata: only subjects that fit any story of this hazard may stand in.
+    concepts = tags & CONCEPTS
+    unfit = {c for c in concepts if c not in NEUTRAL_CONCEPTS and beat_hazard not in CONCEPT_FITS.get(c, set())}
+    if unfit or not concepts:
+        return False, f"Names no hazard; {', '.join(sorted(unfit)) or 'its content'} footage alone cannot be shown as {label}"
+    return True, ''
+
+
+def severity_fit(scene, advisory, asset, tags):
+    """(allowed, reason). Destruction and cleanup footage only on a damage beat of a story that reports damage as having happened."""
+    from .geo_gate import metadata_text
+    # Destruction on screen, from the clip's own words; snow-plow "cleanup" or river "debris" is not aftermath.
+    if not (AFTERMATH.search(metadata_text(asset)) or 'damage' in tags):
+        return True, ''
+    beat = scene.get('script_segment', '')
+    if not topics(beat) & {'damage', 'cleanup', 'rescue'}:
+        return False, 'Shows damage or cleanup; this beat does not describe damage'
+    if not (OBSERVED_DAMAGE.search(beat) or OBSERVED_DAMAGE.search(str(getattr(advisory, 'text', '') or ''))):
+        return False, 'Shows damage or cleanup; the story reports no damage as having happened (forecast or threshold only)'
     return True, ''
 
 
@@ -116,15 +189,22 @@ def rank(scene, assets, advisory, unavailable=(), limit=5, allow_unverified=Fals
     """Library clips that fit a beat, best first. Clips failing the geographic gate are never returned;
     when `excluded` is a list, each exclusion is recorded there with its reason."""
     from .geo_gate import placement
-    wanted = topics(scene.get('source_claim_text') or scene['script_segment'])
+    # Only the words spoken on this shot; the rest of its paragraph never makes a clip eligible.
+    wanted = topics(scene['script_segment'])
     if scene.get('parameters',{}).get('story',{}).get('beat') in ('context','reveal'):
         wanted |= {'storm','rain','wind','waves'}
-    # A sentence without weather or concept words still belongs to its story; match that, weaker.
+    # A sentence without weather words still belongs to its story: add the story's own hazard topics (weaker when the
+    # sentence names nothing at all). Topics from the rest of the paragraph are never used.
     story_only = not wanted
     if story_only:
         wanted = topics(' '.join(str(getattr(advisory, k, '') or '') for k in ('title', 'forecast_excerpt'))) - CONCEPTS
     from .visual_director import classify, story_text
     intent = scene.get('parameters', {}).get('visual_intent') or classify(scene['script_segment'], story_text(advisory))
+    hazard = beat_hazard(scene, advisory, intent['hazard'])
+    # Generic weather words ("storm rainfall keeps the river high") stand for the beat's hazard, its own words first, else
+    # the story's: that line wants flood footage, not any storm clip.
+    if wanted & GENERIC_WEATHER and not wanted & SPECIFIC_HAZARDS:
+        wanted |= HAZARD_TOPICS.get(hazard, set())
     results = []
     for asset in assets:
         if asset['kind'] == 'audio' or asset['id'] in unavailable or not asset.get('rights_confirmed') or asset.get('quarantined'):
@@ -146,8 +226,10 @@ def rank(scene, assets, advisory, unavailable=(), limit=5, allow_unverified=Fals
         shared = wanted & tags
         if not shared:
             continue
-        fits, why = hazard_fit(intent['hazard'], asset, tags)
-        named_match = fits and intent['hazard'] in clip_hazards(asset, tags)
+        fits, why = hazard_fit(hazard, asset, tags, scene, advisory)
+        named_match = fits and hazard in clip_hazards(asset, tags)
+        if fits:
+            fits, why = severity_fit(scene, advisory, asset, tags)
         if not fits:
             # A different hazard is never placed, however plausible its place or weather; the beat keeps its map or graphic.
             if excluded is not None:
@@ -170,7 +252,7 @@ def rank(scene, assets, advisory, unavailable=(), limit=5, allow_unverified=Fals
             reasons.append(f"Shows the beat's hazard: {', '.join(sorted(specific))}")
         elif named_match:
             score += 4  # Same hazard category only (snow on an ice-storm beat, lightning on a hail beat).
-            reasons.append(f"Shows the beat's hazard category: {intent['hazard'].replace('_', ' ')}")
+            reasons.append(f"Shows the beat's hazard category: {hazard.replace('_', ' ')}")
         event = catalog.get('event_id', '')
         if event and event.casefold() == advisory.event_key.casefold():
             score += 30

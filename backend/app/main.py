@@ -560,6 +560,12 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         metadata = MediaImportMetadata.model_validate_json(unquote(header))
         return await app.state.production.import_media(metadata, request.stream())
 
+    @app.post('/api/production/media/folder-import')
+    async def import_footage_folder(body: dict):
+        if body.get('rights_confirmed') is not True:
+            raise ValueError('Confirm you have the right to use the videos in the footage folder.')
+        return await app.state.production.import_folder()
+
     @app.get('/api/production/media/{identity}/file')
     def production_media_file(identity: str):
         media = store.production_get('media', identity)
