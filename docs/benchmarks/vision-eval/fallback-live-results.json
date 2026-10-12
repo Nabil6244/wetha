@@ -1,0 +1,851 @@
+{
+ "plan_id": "5b60d708-5541-4085-81ba-cf0f8d5f7d15",
+ "runs": {
+  "before": {
+   "seconds": 180.9,
+   "searches": {
+    "searches": 23,
+    "extra_searches": 0,
+    "cache_hits": 0,
+    "duplicates_skipped": 9,
+    "extra_cap": 10,
+    "provider_limited": false
+   },
+   "status": {
+    "ready": 8,
+    "review": 0,
+    "needs_attention": 2,
+    "graphics": 0
+   },
+   "auto": 3,
+   "recommended": 24,
+   "clean_offered": 24,
+   "distinct_clips": 36,
+   "conflicts_auto": [],
+   "vision_held": [],
+   "warnings": [
+    "Wikimedia search is unavailable. Reviewed sources and external search links remain available."
+   ],
+   "beats": [
+    {
+     "narration": "The wind forecast was relatively low, but the water threat told a very different",
+     "concept": "storm_surge",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Waves crashing against the sea wall in a coastal t",
+       "no_conflict_evident"
+      ],
+      [
+       "auto",
+       "A pier with waves crashing over it and a building",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Big waves crashing through the wall",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Storm at the coastal area",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "Along Florida\u2019s Gulf Coast, this bulletin warned of potentially life-threatening",
+     "concept": "storm_surge",
+     "status": "needs_attention",
+     "fallback": null,
+     "offered": [
+      [
+       "weak",
+       "Crashing waves on the shore",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Crashing waves at the sea",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Waves crashing on dock",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Dramatic ocean waves crashing on pier",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "of Alabama, heavy rain raised flash-flood concerns. And offshore near Georgia an",
+     "concept": "flash_flood",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Urban street flooding after heavy rainfall",
+       "possible_conflict"
+      ],
+      [
+       "recommended",
+       "Cars passing through flood water on the side stree",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Urban flooding after heavy rainfall in city",
+       "possible_conflict"
+      ],
+      [
+       "recommended",
+       "Urban flooding during rain in mexico city",
+       "conflict"
+      ]
+     ]
+    },
+    {
+     "narration": "a strong thunderstorm threatened small boats with sudden wind gusts and higher w",
+     "concept": "hurricane_wind",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "auto",
+       "San diego palm trees blowing in storm winds",
+       "compatible"
+      ],
+      [
+       "auto",
+       "Palm tree with the strong wind",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Tall palm tree palmettos bend in the gusts of stro",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic tropical sky with swaying palm trees",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "Before we get into the details, please remember: this bulletin is marked expired",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Storm at sea",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Winter storm at sea with rough waves",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Sea waves crashing on rocky coast",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic stormy ocean with rolling waves",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "We\u2019re reviewing reports dated October 10, 2026. These are not current warnings. ",
+     "concept": "forecast_warning",
+     "status": "needs_attention",
+     "fallback": null,
+     "offered": [
+      [
+       "weak",
+       "Dramatic storm clouds rolling over landscape",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "A dark cloudy sky with a few clouds",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Time lapse video of clouds",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Time lapse of clouds movements",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "conditions where you are now, check the latest official weather alerts.",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Typhoon in the coastal area",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic storm waves crashing on coastal tower",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Sea waves crashing the beach shore",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Crashing sea waves",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "Let\u2019s begin in Coastal Dixie, Florida, where water was the biggest concern.",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Surge of sea waves crashing the shore",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Angry sea",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic ocean waves in slow motion",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Storm at sea",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "The National Weather Service in Tallahassee issued the listed storm surge warnin",
+     "concept": "forecast_warning",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Stormy clouds above a rough sea",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic coastal beach under stormy skies",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic coastal waves crashing on rocks",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Drone footage of waves crashing on a coast",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "2:07 a.m. Eastern, identifying Horseshoe Beach and Suwannee among the affected l",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "A large rock in the ocean with waves crashing on i",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "San diego palm trees blowing in storm winds",
+       "compatible"
+      ],
+      [
+       "weak",
+       "Storm at sea",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Winter storm at sea with rough waves",
+       "no_conflict_evident"
+      ]
+     ]
+    }
+   ]
+  },
+  "fallback": {
+   "seconds": 188.5,
+   "searches": {
+    "searches": 20,
+    "extra_searches": 0,
+    "cache_hits": 20,
+    "duplicates_skipped": 8,
+    "extra_cap": 10,
+    "provider_limited": false
+   },
+   "status": {
+    "ready": 7,
+    "review": 0,
+    "needs_attention": 1,
+    "graphics": 2
+   },
+   "auto": 5,
+   "recommended": 18,
+   "clean_offered": 23,
+   "distinct_clips": 28,
+   "conflicts_auto": [],
+   "vision_held": [],
+   "warnings": [
+    "Wikimedia search is unavailable. Reviewed sources and external search links remain available."
+   ],
+   "beats": [
+    {
+     "narration": "The wind forecast was relatively low, but the water threat told a very different",
+     "concept": "storm_surge",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Waves crashing against the sea wall in a coastal t",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "A pier with waves crashing over it and a building",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Big waves crashing through the wall",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Storm at the coastal area",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "Along Florida\u2019s Gulf Coast, this bulletin warned of potentially life-threatening",
+     "concept": "storm_surge",
+     "status": "needs_attention",
+     "fallback": {
+      "queries": [],
+      "note": "No other distinct searches for this beat"
+     },
+     "offered": [
+      [
+       "weak",
+       "Crashing waves on the shore",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Crashing waves at the sea",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Waves crashing on dock",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Dramatic ocean waves crashing on pier",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "of Alabama, heavy rain raised flash-flood concerns. And offshore near Georgia an",
+     "concept": "flash_flood",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Cars passing through flood water on the side stree",
+       "no_conflict_evident"
+      ],
+      [
+       "auto",
+       "Street flooding",
+       "no_conflict_evident"
+      ],
+      [
+       "auto",
+       "Raging river flooding over riverbank",
+       "no_conflict_evident"
+      ],
+      [
+       "auto",
+       "Aerial view of river thames flooding in uk",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "a strong thunderstorm threatened small boats with sudden wind gusts and higher w",
+     "concept": "hurricane_wind",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "auto",
+       "San diego palm trees blowing in storm winds",
+       "compatible"
+      ],
+      [
+       "auto",
+       "Palm tree with the strong wind",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Tall palm tree palmettos bend in the gusts of stro",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic tropical sky with swaying palm trees",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "Before we get into the details, please remember: this bulletin is marked expired",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Winter storm at sea with rough waves",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Sea waves crashing on rocky coast",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic stormy ocean with rolling waves",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "A large rock in the ocean with waves crashing on i",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "We\u2019re reviewing reports dated October 10, 2026. These are not current warnings. ",
+     "concept": "forecast_warning",
+     "status": "graphics",
+     "fallback": null,
+     "offered": []
+    },
+    {
+     "narration": "conditions where you are now, check the latest official weather alerts.",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Typhoon in the coastal area",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic storm waves crashing on coastal tower",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Sea waves crashing the beach shore",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Crashing sea waves",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "Let\u2019s begin in Coastal Dixie, Florida, where water was the biggest concern.",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Surge of sea waves crashing the shore",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Angry sea",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic ocean waves in slow motion",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Winter storm at sea with rough waves",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "The National Weather Service in Tallahassee issued the listed storm surge warnin",
+     "concept": "forecast_warning",
+     "status": "graphics",
+     "fallback": null,
+     "offered": []
+    },
+    {
+     "narration": "2:07 a.m. Eastern, identifying Horseshoe Beach and Suwannee among the affected l",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Dramatic coastal beach under stormy skies",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "San diego palm trees blowing in storm winds",
+       "compatible"
+      ],
+      [
+       "weak",
+       "Winter storm at sea with rough waves",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Sea waves crashing on rocky coast",
+       "no_conflict_evident"
+      ]
+     ]
+    }
+   ]
+  },
+  "fallback_and_vision": {
+   "seconds": 132.2,
+   "searches": {
+    "searches": 20,
+    "extra_searches": 0,
+    "cache_hits": 20,
+    "duplicates_skipped": 8,
+    "extra_cap": 10,
+    "provider_limited": false
+   },
+   "status": {
+    "ready": 7,
+    "review": 0,
+    "needs_attention": 1,
+    "graphics": 2
+   },
+   "auto": 6,
+   "recommended": 17,
+   "clean_offered": 23,
+   "distinct_clips": 28,
+   "conflicts_auto": [],
+   "vision_held": [],
+   "warnings": [
+    "Wikimedia search is unavailable. Reviewed sources and external search links remain available."
+   ],
+   "beats": [
+    {
+     "narration": "The wind forecast was relatively low, but the water threat told a very different",
+     "concept": "storm_surge",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Waves crashing against the sea wall in a coastal t",
+       "no_conflict_evident"
+      ],
+      [
+       "auto",
+       "A pier with waves crashing over it and a building",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Big waves crashing through the wall",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Storm at the coastal area",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "Along Florida\u2019s Gulf Coast, this bulletin warned of potentially life-threatening",
+     "concept": "storm_surge",
+     "status": "needs_attention",
+     "fallback": {
+      "queries": [],
+      "note": "No other distinct searches for this beat"
+     },
+     "offered": [
+      [
+       "weak",
+       "Crashing waves on the shore",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Crashing waves at the sea",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Waves crashing on dock",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Dramatic ocean waves crashing on pier",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "of Alabama, heavy rain raised flash-flood concerns. And offshore near Georgia an",
+     "concept": "flash_flood",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Cars passing through flood water on the side stree",
+       "no_conflict_evident"
+      ],
+      [
+       "auto",
+       "Street flooding",
+       "no_conflict_evident"
+      ],
+      [
+       "auto",
+       "Raging river flooding over riverbank",
+       "no_conflict_evident"
+      ],
+      [
+       "auto",
+       "Aerial view of river thames flooding in uk",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "a strong thunderstorm threatened small boats with sudden wind gusts and higher w",
+     "concept": "hurricane_wind",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "auto",
+       "San diego palm trees blowing in storm winds",
+       "compatible"
+      ],
+      [
+       "auto",
+       "Palm tree with the strong wind",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Tall palm tree palmettos bend in the gusts of stro",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic tropical sky with swaying palm trees",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "Before we get into the details, please remember: this bulletin is marked expired",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Winter storm at sea with rough waves",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Sea waves crashing on rocky coast",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic stormy ocean with rolling waves",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "A large rock in the ocean with waves crashing on i",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "We\u2019re reviewing reports dated October 10, 2026. These are not current warnings. ",
+     "concept": "forecast_warning",
+     "status": "graphics",
+     "fallback": null,
+     "offered": []
+    },
+    {
+     "narration": "conditions where you are now, check the latest official weather alerts.",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Typhoon in the coastal area",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic storm waves crashing on coastal tower",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Sea waves crashing the beach shore",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Crashing sea waves",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "Let\u2019s begin in Coastal Dixie, Florida, where water was the biggest concern.",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Surge of sea waves crashing the shore",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Angry sea",
+       "no_conflict_evident"
+      ],
+      [
+       "recommended",
+       "Dramatic ocean waves in slow motion",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Winter storm at sea with rough waves",
+       "no_conflict_evident"
+      ]
+     ]
+    },
+    {
+     "narration": "The National Weather Service in Tallahassee issued the listed storm surge warnin",
+     "concept": "forecast_warning",
+     "status": "graphics",
+     "fallback": null,
+     "offered": []
+    },
+    {
+     "narration": "2:07 a.m. Eastern, identifying Horseshoe Beach and Suwannee among the affected l",
+     "concept": "general_context",
+     "status": "ready",
+     "fallback": null,
+     "offered": [
+      [
+       "recommended",
+       "Dramatic coastal beach under stormy skies",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "San diego palm trees blowing in storm winds",
+       "compatible"
+      ],
+      [
+       "weak",
+       "Winter storm at sea with rough waves",
+       "no_conflict_evident"
+      ],
+      [
+       "weak",
+       "Sea waves crashing on rocky coast",
+       "no_conflict_evident"
+      ]
+     ]
+    }
+   ]
+  }
+ }
+}

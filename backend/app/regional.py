@@ -54,14 +54,24 @@ def split_targets(scene):
     return primary,[c for c in wanted if c not in primary]
 
 
+# Practical coverage groups: footage reviewed in one state can stand in, labelled with where it was filmed,
+# for a story in a comparable state of the same group. Not a claim that a hazard is confined to a group.
+COMPARABLE=({'FL','TX','LA','MS','AL'},{'GA','SC','NC','TN','AL','FL','VA','KY'},{'OK','KS','NE','TX','SD','ND','CO'},
+            {'IL','MO','IA','AR','IN','OH','KY','WI','MN'},{'CA','OR','WA','NV','AZ','UT','CO','NM','ID','MT','WY'},
+            {'NY','NJ','PA','CT','MA','RI','NH','VT','ME','MD','DE','DC','VA'},{'MI','WI','MN','OH','IL','IN','NY','PA'})
+
+
 def location_status(scene,asset):
-    """'unscoped' (beat names no place), 'reviewed' (reviewed capture region matches), 'elsewhere'
-    (reviewed capture region is another place), or 'unverified' (location unknown or only declared)."""
+    """'unscoped' (beat names no place), 'reviewed' (reviewed capture region matches), 'nearby' (reviewed
+    capture region is a comparable state; shown labelled with its own location), 'elsewhere' (reviewed
+    capture region is an unrelated place), or 'unverified' (location unknown or only declared)."""
     wanted=targets(scene)
     if not wanted:return 'unscoped'
     if match_media(scene,asset):return 'reviewed'
     cat=asset.get('catalog',{})
-    if cat.get('location_reviewed') and cat.get('region_codes'):return 'elsewhere'
+    if cat.get('location_reviewed') and cat.get('region_codes'):
+        filmed=set(cat['region_codes'])
+        return 'nearby' if cat.get('reference') and any(g&filmed and g&set(wanted) for g in COMPARABLE) else 'elsewhere'
     return 'unverified'
 
 
@@ -97,10 +107,12 @@ def focus(scene,media,presentation,allow_unverified=False):
     if selected:
         statuses=[location_status(scene,asset) for asset in selected]
         for asset,status in zip(selected,statuses):
-            if status=='reviewed' or (allow_unverified and status=='unverified'):continue
+            if status=='reviewed' or (allow_unverified and status in ('unverified','nearby')):continue
             raise ValueError(f"{names}: {asset['name']} needs a matching capture region and a reviewed location reference. Unknown or unrelated footage cannot cover this scene.")
         if 'unverified' in statuses:
             return {'regions':wanted,'status':'illustrative_location_not_verified','note':'Illustrative footage; its filming location is not verified and is labelled on screen.'}
+        if 'nearby' in statuses:
+            return {'regions':wanted,'status':'comparable_region_footage','note':'Reviewed footage from a comparable region, labelled on screen with where it was filmed.'}
         return {'regions':wanted,'status':'reviewed_capture_location','note':'Location is editor-attested from the recorded reference; event attribution remains separately labeled.'}
     if presentation!='broadcast':
         raise ValueError(f'{names}: use Broadcast style for a region-focused source graphic or choose location-reviewed footage.')

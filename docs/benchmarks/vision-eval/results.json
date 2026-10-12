@@ -1,0 +1,860 @@
+{
+ "examples": 23,
+ "vision_available": true,
+ "vision_runtime": {
+  "seconds": 0.0,
+  "frames_already_cached": 23
+ },
+ "heuristic": {
+  "correct": 19,
+  "of": 23,
+  "false_auto": [
+   "Urban street flooding after heavy rainfall"
+  ],
+  "relevant_demoted": [
+   "View from satellite on earth"
+  ],
+  "irrelevant_accepted": [
+   "Flooded pathway with pedestrian warning sign",
+   "Tall palm tree palmettos bend in the gusts of strong desert wind",
+   "Dramatic tropical sky with swaying palm trees"
+  ],
+  "by_category": {
+   "surge_genuine": "2/2",
+   "surge_bright_town": "1/1",
+   "ordinary_waves": "3/3",
+   "flood_genuine": "2/2",
+   "shallow_water": "0/1",
+   "flood_foreign": "5/5",
+   "palms_storm": "3/3",
+   "palms_calm": "1/3",
+   "keyword_fp": "2/2",
+   "keyword_fp_ambiguous": "0/1"
+  }
+ },
+ "vision_assisted": {
+  "correct": 20,
+  "of": 23,
+  "false_auto": [
+   "Urban street flooding after heavy rainfall"
+  ],
+  "relevant_demoted": [
+   "View from satellite on earth"
+  ],
+  "irrelevant_accepted": [
+   "Flooded pathway with pedestrian warning sign",
+   "Dramatic tropical sky with swaying palm trees"
+  ],
+  "by_category": {
+   "surge_genuine": "2/2",
+   "surge_bright_town": "1/1",
+   "ordinary_waves": "3/3",
+   "flood_genuine": "2/2",
+   "shallow_water": "0/1",
+   "flood_foreign": "5/5",
+   "palms_storm": "3/3",
+   "palms_calm": "2/3",
+   "keyword_fp": "2/2",
+   "keyword_fp_ambiguous": "0/1"
+  }
+ },
+ "foreign_setting_identified_by_vision": "2/4",
+ "rows": [
+  {
+   "category": "surge_genuine",
+   "title": "A pier with waves crashing over it and a building",
+   "relevant": 1,
+   "setting_mismatch_visible": 0,
+   "reason": "Waves overtop a pier walkway in rough grey sea",
+   "heuristic": "auto",
+   "vision": "auto",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "outdoor",
+     "sky",
+     "cloudy",
+     "structure",
+     "fence",
+     "liquid"
+    ],
+    "evidence": {
+     "water": 0.59,
+     "stormy_sky": 0.91,
+     "blue_sky": 0.2,
+     "space": 0,
+     "inland_terrain": 0.09,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees outdoor, sky, cloudy"
+   }
+  },
+  {
+   "category": "surge_genuine",
+   "title": "Big waves crashing through the wall",
+   "relevant": 1,
+   "setting_mismatch_visible": 0,
+   "reason": "Sea water bursting over a seawall onto the promenade",
+   "heuristic": "recommended",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "liquid",
+     "water",
+     "water_body",
+     "ocean",
+     "outdoor",
+     "sky"
+    ],
+    "evidence": {
+     "water": 0.79,
+     "stormy_sky": 0.58,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0.3,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees liquid, water, water_body"
+   }
+  },
+  {
+   "category": "surge_bright_town",
+   "title": "Waves crashing against the sea wall in a coastal town",
+   "relevant": 1,
+   "setting_mismatch_visible": 0,
+   "reason": "Waves hit a seawall below white buildings under an overcast sky",
+   "heuristic": "recommended",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "liquid",
+     "water",
+     "frozen",
+     "snow",
+     "outdoor",
+     "sky"
+    ],
+    "evidence": {
+     "water": 0.62,
+     "stormy_sky": 0.53,
+     "blue_sky": 0.08,
+     "space": 0,
+     "inland_terrain": 0.11,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees liquid, water, frozen"
+   }
+  },
+  {
+   "category": "ordinary_waves",
+   "title": "Crashing waves on the shore",
+   "relevant": 0,
+   "setting_mismatch_visible": 0,
+   "reason": "Breaking surf on a beach; no water over land",
+   "heuristic": "weak",
+   "vision": "weak",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "outdoor",
+     "sky",
+     "cloudy",
+     "plant",
+     "branch",
+     "structure"
+    ],
+    "evidence": {
+     "water": 0.14,
+     "stormy_sky": 0.88,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0.27,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees outdoor, sky, cloudy"
+   }
+  },
+  {
+   "category": "ordinary_waves",
+   "title": "Sea waves crashing the beach shore",
+   "relevant": 0,
+   "setting_mismatch_visible": 0,
+   "reason": "Green surf on sand; no inundation",
+   "heuristic": "weak",
+   "vision": "weak",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "liquid",
+     "water",
+     "frozen",
+     "snow",
+     "structure",
+     "rocks"
+    ],
+    "evidence": {
+     "water": 0.47,
+     "stormy_sky": 0,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "low",
+    "rationale": "sees liquid, water, frozen"
+   }
+  },
+  {
+   "category": "ordinary_waves",
+   "title": "A large wave crashes into the rocks at the end of a pier",
+   "relevant": 0,
+   "setting_mismatch_visible": 0,
+   "reason": "Wave on rocks under blue sky; no inundation",
+   "heuristic": "weak",
+   "vision": "weak",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "liquid",
+     "ocean",
+     "water",
+     "water_body",
+     "rocks",
+     "structure"
+    ],
+    "evidence": {
+     "water": 0.96,
+     "stormy_sky": 0,
+     "blue_sky": 0.63,
+     "space": 0,
+     "inland_terrain": 0.14,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [
+     "blue sky visible"
+    ],
+    "actions": [
+     "review"
+    ],
+    "confidence": "medium",
+    "rationale": "sees liquid, ocean, water; blue sky visible"
+   }
+  },
+  {
+   "category": "flood_genuine",
+   "title": "Cars passing through flood water on the side street caused by excessive rainfall",
+   "relevant": 1,
+   "setting_mismatch_visible": 0,
+   "reason": "Cars wading through flood water at night",
+   "heuristic": "recommended",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "material",
+     "curtain",
+     "structure",
+     "conveyance",
+     "portal",
+     "window"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "low",
+    "rationale": "sees material, curtain, structure"
+   }
+  },
+  {
+   "category": "flood_genuine",
+   "title": "Street flooding",
+   "relevant": 1,
+   "setting_mismatch_visible": 0,
+   "reason": "Water running across a road in heavy rain",
+   "heuristic": "auto",
+   "vision": "auto",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "plant",
+     "shrub",
+     "outdoor",
+     "land",
+     "grass",
+     "road"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0.06,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0.67,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees plant, shrub, outdoor"
+   }
+  },
+  {
+   "category": "shallow_water",
+   "title": "Flooded pathway with pedestrian warning sign",
+   "relevant": 0,
+   "setting_mismatch_visible": 0,
+   "reason": "Shallow standing water on a path; no flash flood",
+   "heuristic": "recommended",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "land",
+     "outdoor",
+     "grass",
+     "structure",
+     "sign",
+     "material"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0.72,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees land, outdoor, grass"
+   }
+  },
+  {
+   "category": "flood_foreign",
+   "title": "Urban street flooding after heavy rainfall",
+   "relevant": 1,
+   "setting_mismatch_visible": 1,
+   "reason": "Flooded city street; South Asian signage and overpass",
+   "heuristic": "auto",
+   "vision": "auto",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "structure",
+     "fence",
+     "outdoor",
+     "land",
+     "plant",
+     "foliage"
+    ],
+    "evidence": {
+     "water": 0.1,
+     "stormy_sky": 0,
+     "blue_sky": 0.22,
+     "space": 0,
+     "inland_terrain": 0.36,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees structure, fence, outdoor"
+   }
+  },
+  {
+   "category": "flood_foreign",
+   "title": "Urban flooded street with rickshaw and cars",
+   "relevant": 1,
+   "setting_mismatch_visible": 1,
+   "reason": "Flooded street with cycle rickshaw and Bengali signage",
+   "heuristic": "recommended",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "people",
+     "adult",
+     "structure",
+     "outdoor",
+     "land",
+     "path"
+    ],
+    "evidence": {
+     "water": 0.14,
+     "stormy_sky": 0,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0.29,
+     "palms": 0
+    },
+    "setting_cues": [
+     "vehicle or building type common outside the US (rickshaw)"
+    ],
+    "issues": [
+     "possible setting outside the story region (uncertain)"
+    ],
+    "actions": [
+     "review"
+    ],
+    "confidence": "medium",
+    "rationale": "sees people, adult, structure; possible setting outside the story region (uncertain)"
+   }
+  },
+  {
+   "category": "flood_foreign",
+   "title": "Flooded urban street with vendors and rickshaws",
+   "relevant": 1,
+   "setting_mismatch_visible": 1,
+   "reason": "Vendors and rickshaws in flood water",
+   "heuristic": "recommended",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "people",
+     "adult",
+     "plant",
+     "decorative_plant",
+     "foliage",
+     "container"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0.09,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees people, adult, plant"
+   }
+  },
+  {
+   "category": "flood_foreign",
+   "title": "Urban flooding during rain in mexico city",
+   "relevant": 1,
+   "setting_mismatch_visible": 0,
+   "reason": "Car splashing through a flooded avenue; titled Mexico City; nothing in the frame shows it is abroad (title only)",
+   "heuristic": "recommended",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "machine",
+     "automobile",
+     "vehicle",
+     "car",
+     "outdoor",
+     "land"
+    ],
+    "evidence": {
+     "water": 0.13,
+     "stormy_sky": 0.41,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0.65,
+     "palms": 0.19
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees machine, automobile, vehicle"
+   }
+  },
+  {
+   "category": "flood_foreign",
+   "title": "People walking on a flooded street",
+   "relevant": 1,
+   "setting_mismatch_visible": 1,
+   "reason": "Pedestrians and motorbike in flood water, South Asian shopfronts",
+   "heuristic": "recommended",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "people",
+     "adult",
+     "machine",
+     "vehicle",
+     "bicycle",
+     "rickshaw"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0.06,
+     "palms": 0
+    },
+    "setting_cues": [
+     "vehicle or building type common outside the US (rickshaw)",
+     "signage in a non-Latin script"
+    ],
+    "issues": [
+     "possible setting outside the story region (uncertain)"
+    ],
+    "actions": [
+     "review"
+    ],
+    "confidence": "medium",
+    "rationale": "sees people, adult, machine; possible setting outside the story region (uncertain)"
+   }
+  },
+  {
+   "category": "palms_storm",
+   "title": "San diego palm trees blowing in storm winds",
+   "relevant": 1,
+   "setting_mismatch_visible": 0,
+   "reason": "Palms bent hard under a grey sky",
+   "heuristic": "auto",
+   "vision": "auto",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "plant",
+     "palm_tree",
+     "tree",
+     "structure",
+     "wood_natural",
+     "foliage"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0,
+     "blue_sky": 0,
+     "space": 0,
+     "inland_terrain": 0,
+     "palms": 0.87
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees plant, palm_tree, tree"
+   }
+  },
+  {
+   "category": "palms_storm",
+   "title": "Palm tree with the strong wind",
+   "relevant": 1,
+   "setting_mismatch_visible": 0,
+   "reason": "Fronds whipping in strong wind, pale sky",
+   "heuristic": "auto",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "blue_sky",
+     "outdoor",
+     "sky",
+     "plant",
+     "palm_tree",
+     "tree"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0,
+     "blue_sky": 0.71,
+     "space": 0,
+     "inland_terrain": 0,
+     "palms": 0.27
+    },
+    "setting_cues": [],
+    "issues": [
+     "blue sky visible"
+    ],
+    "actions": [
+     "review"
+    ],
+    "confidence": "medium",
+    "rationale": "sees blue_sky, outdoor, sky; blue sky visible"
+   }
+  },
+  {
+   "category": "palms_storm",
+   "title": "Swaying palm trees against cloudy skies",
+   "relevant": 1,
+   "setting_mismatch_visible": 0,
+   "reason": "Palms leaning in wind under overcast cloud",
+   "heuristic": "recommended",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "outdoor",
+     "sky",
+     "cloudy",
+     "plant",
+     "palm_tree",
+     "tree"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0.85,
+     "blue_sky": 0.11,
+     "space": 0,
+     "inland_terrain": 0,
+     "palms": 0.47
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "medium",
+    "rationale": "sees outdoor, sky, cloudy"
+   }
+  },
+  {
+   "category": "palms_calm",
+   "title": "Tall palm tree palmettos bend in the gusts of strong desert wind",
+   "relevant": 0,
+   "setting_mismatch_visible": 0,
+   "reason": "Palms bending but against a clear sunlit sky",
+   "heuristic": "recommended",
+   "vision": "weak",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "plant",
+     "palm_tree",
+     "tree",
+     "outdoor",
+     "blue_sky",
+     "sky"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0,
+     "blue_sky": 0.85,
+     "space": 0,
+     "inland_terrain": 0.31,
+     "palms": 0.92
+    },
+    "setting_cues": [],
+    "issues": [
+     "sunlit blue sky"
+    ],
+    "actions": [
+     "demote"
+    ],
+    "confidence": "medium",
+    "rationale": "sees plant, palm_tree, tree; sunlit blue sky"
+   }
+  },
+  {
+   "category": "palms_calm",
+   "title": "Low angle shot of palm trees on a windy day",
+   "relevant": 0,
+   "setting_mismatch_visible": 0,
+   "reason": "Palm against bright blue sky; fair weather",
+   "heuristic": "weak",
+   "vision": "weak",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "blue_sky",
+     "outdoor",
+     "sky",
+     "plant",
+     "palm_tree",
+     "tree"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0,
+     "blue_sky": 0.97,
+     "space": 0,
+     "inland_terrain": 0,
+     "palms": 0.88
+    },
+    "setting_cues": [],
+    "issues": [
+     "sunlit blue sky"
+    ],
+    "actions": [
+     "demote"
+    ],
+    "confidence": "medium",
+    "rationale": "sees blue_sky, outdoor, sky; sunlit blue sky"
+   }
+  },
+  {
+   "category": "palms_calm",
+   "title": "Dramatic tropical sky with swaying palm trees",
+   "relevant": 0,
+   "setting_mismatch_visible": 0,
+   "reason": "Bright white cumulus, sunny",
+   "heuristic": "recommended",
+   "vision": "recommended",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "outdoor",
+     "sky",
+     "cloudy",
+     "blue_sky",
+     "plant",
+     "palm_tree"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0.9,
+     "blue_sky": 0.7,
+     "space": 0,
+     "inland_terrain": 0,
+     "palms": 0.65
+    },
+    "setting_cues": [],
+    "issues": [
+     "blue sky visible"
+    ],
+    "actions": [
+     "review"
+    ],
+    "confidence": "medium",
+    "rationale": "sees outdoor, sky, cloudy; blue sky visible"
+   }
+  },
+  {
+   "category": "keyword_fp",
+   "title": "Satellite orbiting the earth",
+   "relevant": 0,
+   "setting_mismatch_visible": 0,
+   "reason": "Space illustration, not storm imagery",
+   "heuristic": "weak",
+   "vision": "weak",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "animal",
+     "jellyfish",
+     "outdoor",
+     "sky",
+     "night_sky",
+     "celestial_body"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0,
+     "blue_sky": 0,
+     "space": 0.21,
+     "inland_terrain": 0,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "low",
+    "rationale": "sees animal, jellyfish, outdoor"
+   }
+  },
+  {
+   "category": "keyword_fp_ambiguous",
+   "title": "View from satellite on earth",
+   "relevant": 1,
+   "setting_mismatch_visible": 0,
+   "reason": "A cyclone is visible from orbit; generic but on-topic for a forecast beat",
+   "heuristic": "weak",
+   "vision": "weak",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "outdoor",
+     "sky",
+     "night_sky",
+     "celestial_body",
+     "moon",
+     "blue_sky"
+    ],
+    "evidence": {
+     "water": 0.07,
+     "stormy_sky": 0.05,
+     "blue_sky": 0.07,
+     "space": 0.2,
+     "inland_terrain": 0,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [],
+    "actions": [],
+    "confidence": "low",
+    "rationale": "sees outdoor, sky, night_sky"
+   }
+  },
+  {
+   "category": "keyword_fp",
+   "title": "Aerial view of mountain weather station tower",
+   "relevant": 0,
+   "setting_mismatch_visible": 0,
+   "reason": "A radar dome on a forested mountain in fair weather",
+   "heuristic": "weak",
+   "vision": "weak",
+   "vision_findings": {
+    "version": "apple-vision-1",
+    "visible_scene": [
+     "outdoor",
+     "sky",
+     "cloudy",
+     "land",
+     "hill",
+     "blue_sky"
+    ],
+    "evidence": {
+     "water": 0,
+     "stormy_sky": 0.95,
+     "blue_sky": 0.87,
+     "space": 0,
+     "inland_terrain": 0.9,
+     "palms": 0
+    },
+    "setting_cues": [],
+    "issues": [
+     "inland terrain, no water"
+    ],
+    "actions": [
+     "demote"
+    ],
+    "confidence": "medium",
+    "rationale": "sees outdoor, sky, cloudy; inland terrain, no water"
+   }
+  }
+ ]
+}

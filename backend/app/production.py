@@ -150,7 +150,10 @@ class Production:
         timelines = self.store.production_list('timelines')
         scripts = self.describe_scripts({t['script_id'] for t in timelines}) if self.describe_scripts and timelines else {}
         described = {t['id']:self.describe_timeline(t, scripts.get(t['script_id'])) for t in timelines}
-        return {'runtime': self.runtime(), 'media': self.store.production_list('media'),
+        library = self.store.production_list('media')
+        return {'runtime': self.runtime(), 'media': [m for m in library if not m.get('quarantined')],
+                'quarantined_media': [{k: m.get(k) for k in ('id', 'name', 'kind', 'context', 'license', 'attribution', 'source', 'bytes', 'seconds', 'width', 'height', 'catalog', 'quarantined')}
+                                      for m in library if m.get('quarantined')],
                 'timelines': list(described.values()),
                 'renders': [{**r, 'timeline_state':described[r['timeline_id']]} for r in self.store.production_list('renders')],
                 'benchmark': self.benchmark_info(), 'complete_episode': self.episode_info(),
@@ -289,6 +292,8 @@ class Production:
 
     def media_path(self, document):
         # IDs/filenames are generated here; request paths never become local file paths.
+        if document.get('quarantined'):
+            raise ValueError(f"{document['name']} is quarantined ({document['quarantined']['reason']}) and cannot be used.")
         path = self.root / 'media' / document['filename']
         if not path.is_file() or checksum(path) != document['checksum']:
             raise ValueError('Imported media is missing or its checksum changed. Import the original file again.')
@@ -347,7 +352,7 @@ class Production:
                         raise ValueError('The imported image is not a valid still image.') from error
                 else:
                     measured = duration(info)
-                    shots = await asyncio.to_thread(footage_library.detect_shots, temporary, measured)
+                    shots = await asyncio.to_thread(footage_library.analyse, temporary, measured)
             elif not audio or visual:
                 raise ValueError('Import an audio-only narration file.')
             else:
@@ -357,7 +362,7 @@ class Production:
                         'seconds': measured, 'width': visual['width'] if visual else None,
                         'height': visual['height'] if visual else None, 'created_at': now()}
             if shots is not None:
-                document['shot_starts'] = shots
+                document.update(shots)
             temporary.replace(self.root / 'media' / document['filename'])
             self.store.production_save('media', document)
             return document
@@ -381,19 +386,54 @@ class Production:
             raise KeyError(identity)
         return path
 
-    def analyze_shots(self):
-        """Backfill internal shot changes for library videos imported before shot analysis."""
+    def quarantine_media(self, identity, reason):
+        """Move a clip out of the searchable library without deleting it. Refused while any timeline uses it."""
+        document = self.store.production_get('media', identity)
+        if document.get('quarantined'):
+            return document
+        users = [t['id'] for t in self.store.production_list('timelines')
+                 if identity in {s.get('media_id') for s in t['scenes']} | {c['media_id'] for s in t['scenes'] for c in s.get('cuts', [])}]
+        if users:
+            raise ValueError(f'{document["name"]} is used by {len(users)} saved timeline(s); it cannot be quarantined.')
+        source = self.media_path(document)
+        folder = self.root / 'quarantine';folder.mkdir(exist_ok=True)
+        target = folder / document['filename']
+        source.replace(target)
+        document = {**document, 'quarantined': {'reason': reason, 'at': now(), 'path': str(target)}}
+        self.store.production_update_media(document)
+        return document
+
+    def restore_media(self, identity):
+        document = self.store.production_get('media', identity)
+        if not document.get('quarantined'):
+            return document
+        source = Path(document['quarantined']['path'])
+        if not source.is_file() or checksum(source) != document['checksum']:
+            raise ValueError('The quarantined file is missing or changed; it cannot be restored.')
+        source.replace(self.root / 'media' / document['filename'])
+        document = {k: v for k, v in document.items() if k != 'quarantined'}
+        self.store.production_update_media(document)
+        return document
+
+    def unanalyzed_media(self):
+        """Library videos imported before shot and unusable-range analysis."""
+        return [a for a in self.store.production_list('media')
+                if a['kind'] == 'video' and 'unusable_ranges' not in a and not a.get('quarantined')]
+
+    def analyze_shots(self, on_progress=None):
+        """Backfill internal shot changes and black/frozen ranges for library videos imported before analysis."""
         analyzed, failed = 0, []
-        for asset in self.store.production_list('media'):
-            if asset['kind'] != 'video' or 'shot_starts' in asset:
-                continue
+        pending = self.unanalyzed_media()
+        for index, asset in enumerate(pending):
+            if on_progress:
+                on_progress(index, len(pending), asset['name'])
             try:
-                shots = footage_library.detect_shots(self.media_path(asset), asset['seconds'])
+                result = footage_library.analyse(self.media_path(asset), asset['seconds'])
             except (ValueError, OSError):
-                shots = None
-            if shots is None:
+                result = None
+            if result is None:
                 failed.append(asset['name']);continue
-            self.store.production_update_media({**asset, 'shot_starts': shots})
+            self.store.production_update_media({**asset, **result})
             analyzed += 1
         return {'analyzed': analyzed, 'failed': failed}
 
@@ -423,7 +463,12 @@ class Production:
             raise ValueError('The preferred trim leaves less than a complete 3–4 second cut.')
         if asset['kind'] == 'image' and body.preferred_trim_start:
             raise ValueError('Still images do not have a trim point.')
-        return self.store.production_catalog(identity, body.model_dump(mode='json'))
+        catalog = body.model_dump(mode='json')
+        previous = asset.get('catalog', {})
+        if catalog['setting_cleared']:
+            # Keep the original clearance time when re-saving an already cleared clip.
+            catalog['setting_cleared_at'] = previous.get('setting_cleared_at') if previous.get('setting_cleared') else now()
+        return self.store.production_catalog(identity, catalog)
 
     def story(self, body):
         from .story import build
@@ -613,6 +658,7 @@ class Production:
                 scene['source_advisory_ids']=row['source_advisory_ids']
                 scene['source_audit']=row
                 scene['advisory_timestamp']=self.store.advisory(identity).issued_at.isoformat()
+        self.check_geography(scenes, media, script['advisory_id'])
         from .location_labels import apply as apply_places
         for scene in scenes:
             apply_places(scene['parameters'], self.store.advisory(scene['parameters'].get('source_advisory_id',script['advisory_id'])),scene['script_segment'])
@@ -874,7 +920,25 @@ class Production:
                     regional.focus(copy.deepcopy(scene), pinned, timeline.get('presentation','captioned'), timeline.get('unverified_location_footage', False))
                 elif not scene.get('regional_relevance'):
                     raise ValueError('Re-save this regional timeline to apply location relevance checks.')
+        # Re-checked at render time with the library's current records, so a later clearance counts and a
+        # timeline saved before the gate cannot render a blocked clip.
+        self.check_geography(timeline['scenes'], media, script['advisory_id'])
         return {**timeline, 'source_label': script['label']}, media
+
+    def check_geography(self, scenes, media, default_advisory):
+        """Refuse any scene that places a clip failing the geographic gate (automatic or manual placement)."""
+        from .geo_gate import placement
+        for index, scene in enumerate(scenes):
+            clips = ([scene['media_id']] if scene.get('media_id') else []) + [c['media_id'] for c in scene.get('cuts', [])]
+            if not clips:
+                continue
+            advisory = self.store.advisory(scene['parameters'].get('source_advisory_id') or default_advisory)
+            for clip in clips:
+                if clip not in media:
+                    continue
+                gate = placement(media[clip], scene.get('script_segment', ''), advisory)
+                if not gate['allowed']:
+                    raise ValueError(f"Shot {index + 1}: {media[clip]['name']} cannot be used here. {gate['reason']}")
 
     def start(self, identity, retry_id=None):
         if len(self.tasks) >= 4:
@@ -1089,11 +1153,13 @@ class Production:
         context = asset['context'].upper()
         event = catalog.get('event_id') or ''
         stamp = catalog.get('captured_at') or catalog.get('capture_date') or ''
-        caption = ' · '.join(str(v) for v in (context, event, stamp) if v)
-        if scene is not None and regional.location_status(scene, asset) == 'unverified':
-            caption += ' · LOCATION NOT VERIFIED'
-        draw.rounded_rectangle((45,40,1100,95),radius=12,fill=(6,23,36,220))
-        broadcast.label(draw,(65,55),caption[:95],24,'#e7f1f8')
+        # No on-screen badge for illustrative footage ("ILLUSTRATIVE · LOCATION NOT VERIFIED"); its provenance and
+        # location status stay in the production report and description. Dated archive footage keeps its date so a
+        # past event is never read as the current story.
+        if asset['context'] == 'archival' and (event or stamp):
+            caption = ' · '.join(str(v) for v in (context, event, stamp) if v)
+            draw.rounded_rectangle((45,40,1100,95),radius=12,fill=(6,23,36,220))
+            broadcast.label(draw,(65,55),caption[:95],24,'#e7f1f8')
         if scene is not None:
             from .geography import mentions, locator
             places = mentions(scene.get('script_segment', ''))
@@ -1351,10 +1417,11 @@ class Production:
                     raise ValueError('The video stream ended early or has an incorrect frame count; audio duration cannot validate the picture.')
                 # Decode every output frame/sample; probing headers alone is insufficient.
                 await self.command(job, ['-loglevel', 'info', '-xerror', '-i', 'program.mp4', '-map', '0:v:0', '-map', '0:a:0',
-                                         '-vf', f'blackdetect=d=1:pix_th=0.005:pic_th=0.995,freezedetect=n=0.001:d={production_report.FREEZE_SECONDS}',
+                                         # The second detector tolerates on-screen labels, so footage that goes black under its caption is found.
+                                         '-vf', f'blackdetect=d=1:pix_th=0.005:pic_th=0.995,blackdetect=d=0.5:pix_th=0.05:pic_th=0.9,freezedetect=n=0.001:d={production_report.FREEZE_SECONDS}',
                                          '-af', 'silencedetect=noise=-50dB:d=2,ebur128=peak=true', '-f', 'null', '-'], log_name='qc.log')
                 qc = (work / 'qc.log').read_text(errors='replace')
-                if re.search(r'black_start:', qc):
+                if re.search(production_report.BLACK_FRAME, qc):
                     raise ValueError('The output contains an extended nearly black interval. Inspect the scene assets and qc.log.')
                 warnings = ['Imported narration contains extended silence; listen to the preview.'] if timeline['narration_id'] and 'silence_start:' in qc else []
                 if any(scene.get('observations') for scene in timeline['scenes']):

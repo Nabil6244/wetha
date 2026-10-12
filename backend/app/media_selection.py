@@ -7,7 +7,7 @@ GROUPS = {
     'wind': ('wind', 'winds', 'gust', 'gusts', 'windy'),
     'rain': ('rain', 'rainfall', 'raining', 'downpour', 'precipitation'),
     'flood': ('flood', 'floods', 'flooding', 'inundation'),
-    'waves': ('wave', 'waves', 'sea', 'seas', 'surf', 'coastal', 'coast', 'surge'),
+    'waves': ('wave', 'waves', 'sea', 'seas', 'surf', 'surge'),  # Not 'coast': place names (Gulf Coast) and calm beach shots are not waves.
     'snow': ('snow', 'snowfall', 'blizzard'),
     'lightning': ('lightning', 'thunder', 'thunderstorm', 'thunderstorms'),
     'storm': ('storm', 'storms', 'hurricane', 'cyclone', 'typhoon'),
@@ -23,7 +23,7 @@ GROUPS = {
     'traffic': ('road', 'roads', 'highway', 'highways', 'traffic', 'bridge', 'bridges', 'interstate', 'travel'),
     'residents': ('residents', 'people', 'families', 'community', 'communities', 'neighborhood', 'neighborhoods', 'homes'),
     'sky': ('clouds', 'cloud', 'sky', 'skies', 'overcast', 'darkened'),
-    'ice': ('ice', 'icy', 'sleet', 'glaze', 'frozen'),
+    'ice': ('ice', 'icy', 'sleet', 'glaze', 'frozen', 'freezing'),
     'heat': ('heat', 'heatwave', 'hot', 'scorching', 'swelter'),
     'cold': ('cold', 'frigid', 'freeze', 'chill', 'subzero'),
     'drought': ('drought', 'dry', 'parched', 'arid'),
@@ -58,13 +58,64 @@ def temporal_label(asset, advisory):
     return 'current' if captured[:10] == issued.date().isoformat() else 'archival'
 GRAPHICS = {'storm_track', 'cinematic_weather_map', 'what_changed', 'radar_animation', 'satellite_timelapse'}
 
+# Hazard gate. A beat's hazard comes from visual_director.classify; a clip's from its own metadata. Generic
+# damage/cleanup/rescue tags never establish a hazard, so hurricane cleanup cannot pass as snowstorm footage.
+CLIP_HAZARD_TOPICS = {'tornado': 'tornado', 'hail': 'severe_storm', 'lightning': 'severe_storm', 'flood': 'flood',
+                      'snow': 'winter', 'ice': 'winter', 'wildfire': 'wildfire', 'heat': 'heat', 'drought': 'heat', 'cold': 'cold'}
+TROPICAL = re.compile(r'\b(hurricane|tropical (?:storm|depression|cyclone)|typhoon|cyclone|eyewall)\b|\b(?:al|ep|cp)\d{6}\b', re.I)
+SURGE = re.compile(r'\bsurge\b', re.I)
+# Hazards that show the same thing on screen: hurricane flooding is flooding, a supercell is a severe storm.
+RELATED = {'tropical_cyclone': {'flood'}, 'flood': {'tropical_cyclone'}, 'tornado': {'severe_storm'}, 'severe_storm': {'tornado'},
+           'winter': {'cold'}, 'cold': {'winter'}}
+# Weather a clip without a named hazard may show on a beat of each hazard. Rough seas are not a snowstorm.
+COMPATIBLE = {'tropical_cyclone': {'storm', 'waves', 'wind', 'rain', 'flood', 'sky'}, 'flood': {'flood', 'rain', 'storm', 'waves'},
+              'tornado': {'storm', 'wind', 'sky', 'lightning', 'hail', 'rain'}, 'severe_storm': {'storm', 'wind', 'sky', 'lightning', 'hail', 'rain'},
+              'winter': {'snow', 'ice', 'cold', 'wind', 'sky'}, 'cold': {'cold', 'ice', 'snow', 'sky', 'wind'},
+              'heat': {'heat', 'drought', 'sky'}, 'wildfire': {'wildfire', 'drought', 'heat', 'wind', 'sky'}}
+PHENOMENA = SHOT_CLASSES['phenomenon'] | {'flood', 'sky'}
+# Topics that name one hazard precisely; generic weather words (storm, wind, rain, sky) do not.
+SPECIFIC_HAZARDS = {'hail', 'ice', 'snow', 'tornado', 'flood', 'wildfire', 'drought', 'heat', 'lightning', 'cold'}
+GENERIC_WEATHER = {'storm', 'wind', 'rain', 'sky'}
+
+
+def clip_hazards(asset, tags):
+    """Hazards a clip's own metadata names: hazard tags, hurricane words or a tropical event ID in its name, slug or catalogue."""
+    from .geo_gate import metadata_text
+    text = metadata_text(asset) + ' ' + (asset.get('catalog', {}).get('event_id') or '')
+    found = {CLIP_HAZARD_TOPICS[t] for t in tags if t in CLIP_HAZARD_TOPICS}
+    if TROPICAL.search(text):
+        found.add('tropical_cyclone')
+    if SURGE.search(text):
+        found.add('flood')
+    return found
+
+
+def hazard_fit(beat_hazard, asset, tags):
+    """(allowed, reason). The clip must show the beat's own hazard, a related one, or hazard-neutral weather that fits it."""
+    if beat_hazard not in COMPATIBLE:
+        return True, ''
+    named = clip_hazards(asset, tags)
+    if named:
+        if beat_hazard in named or named & RELATED.get(beat_hazard, set()):
+            return True, ''
+        return False, f"Shows {', '.join(sorted(h.replace('_', ' ') for h in named))}, not the {beat_hazard.replace('_', ' ')} this beat reports"
+    weather = tags & PHENOMENA
+    if weather - COMPATIBLE[beat_hazard]:
+        # Every kind of weather on screen must fit: rough seas with wind are still not a snowstorm.
+        return False, f"Shows {', '.join(sorted(weather - COMPATIBLE[beat_hazard]))}, which does not fit a {beat_hazard.replace('_', ' ')} beat"
+    # Damage, outage or response footage that names no hazard at all is not a different hazard; it still needs a topic match.
+    return True, ''
+
 
 def topics(text):
     words = set(re.findall(r'[a-z]+', text.lower()))
     return {topic for topic, variants in GROUPS.items() if words.intersection(variants)}
 
 
-def rank(scene, assets, advisory, unavailable=(), limit=5, allow_unverified=False):
+def rank(scene, assets, advisory, unavailable=(), limit=5, allow_unverified=False, excluded=None):
+    """Library clips that fit a beat, best first. Clips failing the geographic gate are never returned;
+    when `excluded` is a list, each exclusion is recorded there with its reason."""
+    from .geo_gate import placement
     wanted = topics(scene.get('source_claim_text') or scene['script_segment'])
     if scene.get('parameters',{}).get('story',{}).get('beat') in ('context','reveal'):
         wanted |= {'storm','rain','wind','waves'}
@@ -76,26 +127,50 @@ def rank(scene, assets, advisory, unavailable=(), limit=5, allow_unverified=Fals
     intent = scene.get('parameters', {}).get('visual_intent') or classify(scene['script_segment'], story_text(advisory))
     results = []
     for asset in assets:
-        if asset['kind'] == 'audio' or asset['id'] in unavailable or not asset.get('rights_confirmed'):
+        if asset['kind'] == 'audio' or asset['id'] in unavailable or not asset.get('rights_confirmed') or asset.get('quarantined'):
+            continue
+        gate = placement(asset, scene.get('script_segment', ''), advisory)
+        if not gate['allowed']:
+            if excluded is not None:
+                excluded.append({'media_id': asset['id'], 'name': asset['name'], 'scene_id': scene.get('id'),
+                                 'compatibility': gate['compatibility'], 'reason': gate['reason']})
             continue
         if 'images.nasa.gov' in asset.get('source','') and not topics(asset.get('name','')):
             # Query-derived tags alone cannot turn a space launch into weather footage.
             continue
         place = regional.location_status(scene, asset)
-        if place == 'elsewhere' or (place == 'unverified' and not allow_unverified):
+        if place == 'elsewhere' or (place in ('unverified', 'nearby') and not allow_unverified):
             continue
         catalog = asset.get('catalog', {})
         tags = topics(' '.join(catalog.get('tags', [])) + ' ' + asset['name'])
         shared = wanted & tags
         if not shared:
             continue
+        fits, why = hazard_fit(intent['hazard'], asset, tags)
+        named_match = fits and intent['hazard'] in clip_hazards(asset, tags)
+        if not fits:
+            # A different hazard is never placed, however plausible its place or weather; the beat keeps its map or graphic.
+            if excluded is not None:
+                excluded.append({'media_id': asset['id'], 'name': asset['name'], 'scene_id': scene.get('id'),
+                                 'compatibility': 'hazard_mismatch', 'reason': why})
+            continue
         classes = shot_classes(tags)
         seconds = min(4, max(3, asset.get('preferred_clip_seconds', 3.5)))
         start = catalog.get('preferred_trim_start', 0)
         if asset['kind'] == 'video' and start + seconds > asset['seconds'] + .01:
             continue
-        reasons = (['Reviewed capture region matches script'] if place == 'reviewed' else ['Filming location not verified; labelled on screen'] if place == 'unverified' else []) + [('Story topics: ' if story_only else 'Weather topics: ') + ', '.join(sorted(shared))]
-        score = sum(6 if topic in CONCEPTS else 10 for topic in shared) + (2 if asset['kind'] == 'video' else 0) - (6 if story_only else 0) - (8 if place == 'unverified' else 0)
+        reasons = (['Reviewed capture region matches script'] if place == 'reviewed' else ['Filming location not verified; labelled on screen'] if place == 'unverified'
+                   else [f"Filmed in {catalog.get('location') or ', '.join(catalog.get('region_codes', []))}, a comparable region; labelled on screen"] if place == 'nearby' else []) + [('Story topics: ' if story_only else 'Weather topics: ') + ', '.join(sorted(shared))]
+        # When the beat names a specific hazard, generic weather words count half for a clip that does not show it.
+        diluted = (wanted & SPECIFIC_HAZARDS) and not (shared & SPECIFIC_HAZARDS)
+        score = sum(6 if topic in CONCEPTS else 5 if diluted and topic in GENERIC_WEATHER else 10 for topic in shared) + (2 if asset['kind'] == 'video' else 0) - (6 if story_only else 0) - (8 if place == 'unverified' else 12 if place == 'nearby' else 0)
+        specific = shared & SPECIFIC_HAZARDS
+        if specific:
+            score += 8  # Footage of the beat's own hazard (hail, ice, snow…) outranks hazard-neutral or same-category weather.
+            reasons.append(f"Shows the beat's hazard: {', '.join(sorted(specific))}")
+        elif named_match:
+            score += 4  # Same hazard category only (snow on an ice-storm beat, lightning on a hail beat).
+            reasons.append(f"Shows the beat's hazard category: {intent['hazard'].replace('_', ' ')}")
         event = catalog.get('event_id', '')
         if event and event.casefold() == advisory.event_key.casefold():
             score += 30
@@ -110,9 +185,14 @@ def rank(scene, assets, advisory, unavailable=(), limit=5, allow_unverified=Fals
             else:
                 reasons.append('Capture date differs from advisory date')
         location = catalog.get('location', '').strip()
+        if place == 'reviewed':
+            score += 10  # Footage reviewed as filmed in the story's state outranks generic footage of the same hazard.
         if location and location.casefold() in scene['script_segment'].casefold():
             score += 10
             reasons.append('Declared location appears in script')
+        elif place == 'unverified' and regional.named_regions(location) and not set(regional.named_regions(location)) & set(regional.targets(scene)):
+            score -= 10
+            reasons.append(f'Declared as filmed in {location}, not the place this beat names; labelled location not verified')
         # The beat's meaning decides what the shot should show.
         wanted_class = intent['footage_class']
         if wanted_class in classes:
@@ -139,6 +219,14 @@ def rank(scene, assets, advisory, unavailable=(), limit=5, allow_unverified=Fals
     return sorted(results, key=lambda row: (-row['score'], row['media_id']))[:limit]
 
 
+def unique(excluded):
+    """One exclusion record per clip, for review and debugging."""
+    seen = {}
+    for row in excluded:
+        seen.setdefault(row['media_id'], row)
+    return list(seen.values())
+
+
 def draft(plan, assets, advisory, unavailable=(), template='short_30'):
     """Preserve every claim once, protecting geographic/data scenes and closing."""
     scenes = plan['scenes']
@@ -146,10 +234,10 @@ def draft(plan, assets, advisory, unavailable=(), template='short_30'):
         return report(plan, assets, advisory, unavailable, template)
     if not 1 <= len(scenes) <= 30:
         raise ValueError('The 30-second template needs 1–30 source-linked scenes. Use manual timing for this plan.')
-    used = set()
+    used = set();excluded = []
     edits, suggestions, issues = [], [], []
     for i, scene in enumerate(scenes):
-        choices = rank(scene, assets, advisory, unavailable)
+        choices = rank(scene, assets, advisory, unavailable, excluded=excluded)
         protected = scene['type'] in GRAPHICS or i == len(scenes) - 1
         selected = next((c for c in choices if c['media_id'] not in used), None) if not protected else None
         if selected:
@@ -193,7 +281,7 @@ def draft(plan, assets, advisory, unavailable=(), template='short_30'):
         issues.append({'code': 'sparse_plan', 'message': 'This plan has few graphic scenes; some holds exceed six seconds. A fuller scene plan gives a faster edit.'})
     for index, count in zip(graphics, frames):
         edits[index]['seconds'] = (30 + count) / 30
-    return {'template': 'short_30', 'seconds': 30, 'scenes': edits, 'suggestions': suggestions, 'issues': issues,
+    return {'template': 'short_30', 'seconds': 30, 'scenes': edits, 'suggestions': suggestions, 'issues': issues, 'excluded_footage': unique(excluded),
             'presentation': 'broadcast', 'music': True, 'satellite_context': False,
             'note': 'Local library suggestions; catalogue matches do not verify event attribution. Every source-linked claim is preserved. Review the draft before saving.'}
 
@@ -203,10 +291,10 @@ def report(plan, assets, advisory, unavailable, template):
     scenes = plan['scenes']
     if not 3 <= len(scenes) <= 15:
         raise ValueError('Report templates need 3–15 source-linked scenes. Prepare a fuller scene plan or use manual timing.')
-    edits, suggestions, slots, issues = [], [], [], []
+    edits, suggestions, slots, issues, excluded = [], [], [], [], []
     for i, scene in enumerate(scenes):
         protected = i in (0, len(scenes)-1) or scene['type'] in GRAPHICS
-        choices = rank(scene, assets, advisory, unavailable)
+        choices = rank(scene, assets, advisory, unavailable, excluded=excluded)
         suggestions.append({'scene_id': scene['id'], 'protected_graphic': protected, 'candidates': choices})
         edits.append({'id': scene['id'], 'media_id': None, 'trim_start': 0, 'seconds': 3 if i in (0,len(scenes)-1) else 6, 'transition': 'cut', 'cuts': []})
         if not protected and choices:
@@ -253,6 +341,6 @@ def report(plan, assets, advisory, unavailable, template):
     ready = ready and actual == target
     if not ready:
         issues.append({'code':'insufficient_footage','message':f'Not enough matching, unused footage to build {target} seconds with 3–4 second cuts. Add clips or choose the shorter template.'})
-    return {'template':template,'target_seconds':target,'seconds':actual,'ready':ready,'scenes':edits,'suggestions':suggestions,'issues':issues,
+    return {'template':template,'target_seconds':target,'seconds':actual,'ready':ready,'scenes':edits,'suggestions':suggestions,'issues':issues,'excluded_footage':unique(excluded),
             'presentation':'broadcast','music':True,'satellite_context':False,
             'note':'Report draft preserves claim order. Multiple footage cuts share each script scene; source ranges are never repeated or looped. Graphic holds stay at six seconds or less.'}

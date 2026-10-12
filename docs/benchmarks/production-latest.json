@@ -1,0 +1,35 @@
+{
+  "machine": {
+    "platform": "macOS-15.3.1-arm64-arm-64bit",
+    "processor": "arm",
+    "cpus": 8,
+    "render_workers": 4,
+    "hardware_encoder_available": true
+  },
+  "runs": [
+    {
+      "seconds": 60,
+      "status": "succeeded",
+      "shots": 15,
+      "wall_seconds": 28.7,
+      "realtime_factor": 2.09,
+      "stage_seconds": {
+        "scenes": 15.37,
+        "joins": 0.0,
+        "audio_mix": 2.66,
+        "final_encode": 4.48,
+        "quality_control": 2.66,
+        "packaging": 0.19
+      },
+      "loudness_lufs": -16.0,
+      "errors": 0,
+      "warnings": 2,
+      "rerun_wall_seconds": 12.1,
+      "rerun_reused_scenes": 15,
+      "peak_rss_mb": {
+        "backend": 222.8,
+        "largest_child": 507.8
+      }
+    }
+  ]
+}

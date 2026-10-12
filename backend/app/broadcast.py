@@ -147,6 +147,9 @@ def project(lon, lat):
     return (lon+180)/360, (1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2
 
 
+MIN_VIEW = (8.0, 4.5)  # Smallest default story view in degrees (longitude, latitude): about one state.
+
+
 def fit_bounds(bounds):
     west,south,east,north=bounds
     if not (-180 <= west < east <= 180 and -85 <= south < north <= 85):
@@ -204,6 +207,21 @@ def state_lines(bounds):
         if b[2]<bounds[0] or b[0]>bounds[2] or b[3]<bounds[1] or b[1]>bounds[3]:continue
         for ring in region['rings']:
             d.line([map_point(c,bounds) for c in ring],fill=(236,246,250,190),width=2)
+    return image
+
+
+@lru_cache(maxsize=16)
+def map_context(bounds):
+    """Base map with state outlines and names, so a small warning area is always seen inside its state."""
+    from .regional import catalogue
+    image=map_base(bounds).copy();lines=state_lines(bounds);image.paste(lines,(0,0),lines);d=ImageDraw.Draw(image)
+    width=bounds[2]-bounds[0]
+    for region in catalogue()['regions']:
+        b=region['bounds'];west,south,east,north=max(b[0],bounds[0]),max(b[1],bounds[1]),min(b[2],bounds[2]),min(b[3],bounds[3])
+        if east-west<width*.12 or north<=south:continue  # Too little of the state in view to name it legibly.
+        x,y=map_point(((west+east)/2,(south+north)/2),bounds)
+        text=region['name'].upper();w=d.textlength(text,font=font(30))
+        d.text((max(20,min(1900-w,x-w/2)),max(110,min(900,y-15))),text,font=font(30),fill=(150,196,204))
     return image
 
 
@@ -275,10 +293,14 @@ class Composer:
                 else:
                     for child in value: collect(child)
             for f in parameters.get('geojson',{}).get('features',[]): collect(f['geometry']['coordinates'])
+            if not coords:
+                # Zone-based alerts (winter, wind, marine) carry no polygon; frame the story's own zone or county outlines.
+                for shape in parameters.get('county_shapes') or []: collect(shape['geometry']['coordinates'])
             if coords:
-                # Margin proportional to the story's size: a county warning fills the frame, a hurricane track keeps context.
+                # Margin proportional to the story's size, but never narrower than a state: a county or burn-scar
+                # warning stays readable inside its state's outline instead of filling the frame with blank land.
                 west,east=min(c[0] for c in coords),max(c[0] for c in coords);south,north=min(c[1] for c in coords),max(c[1] for c in coords)
-                dx=max(1.6,(east-west)*.6);dy=max(1.0,(north-south)*.6)
+                dx=max(1.6,(east-west)*.6,(MIN_VIEW[0]-(east-west))/2);dy=max(1.0,(north-south)*.6,(MIN_VIEW[1]-(north-south))/2)
                 bounds=[max(-179,west-dx),max(-80,south-dy),min(179,east+dx),min(80,north+dy)]
             else:
                 bounds=[-85,27,-72,38]
@@ -336,7 +358,7 @@ class Composer:
                 strip=src.crop(tuple(p['source_strip']));strip=ImageOps.contain(strip,tuple(p.get('strip_size',[830,150])))
                 image.paste(strip,(1920-strip.width-45,1080-strip.height-128))
         else:
-            image=map_base(self.bounds).copy(); d=ImageDraw.Draw(image)
+            image=map_context(self.bounds).copy(); d=ImageDraw.Draw(image)
             for region in p.get('regional_boundaries',[]):
                 for ring in region['rings']:
                     d.line([map_point(c,self.bounds) for c in ring],fill='#7ab8bd',width=3)
@@ -350,6 +372,12 @@ class Composer:
                 for polygon in polygons:
                     points=[map_point(c,self.bounds) for c in polygon[0]]
                     d.line(points,fill='#cab7e4' if kind=='forecast_cone' else '#ffc887',width=4)
+            if p.get('visual_state')!='county_focus' and not any(f['geometry']['type'] in ('Polygon','MultiPolygon') for f in p.get('geojson',{}).get('features',[])):
+                # Without an alert polygon, the warned area is the story's own zone/county outlines.
+                for shape in p.get('county_shapes') or []:
+                    g=shape['geometry'];polygons=g['coordinates'] if g['type']=='MultiPolygon' else [g['coordinates']] if g['type']=='Polygon' else []
+                    for polygon in polygons:
+                        d.line([map_point(c,self.bounds) for c in polygon[0]],fill='#ffc887',width=4)
             if p.get('map_mode'):
                 from .map_graphics import geometry
                 geometry(image,p,self.bounds,t)

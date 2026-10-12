@@ -41,6 +41,18 @@ REGIONS = {
 }
 
 
+# Region names that are also compass directions: a region only when written as a proper noun.
+COMPASS = {'northeast', 'southeast'}
+DIRECTION_BEFORE = re.compile(r'(?:moving|move[sd]?|heading|headed|tracking|drifting|turning|toward|towards|to the|from the|winds?|gusts?|flow)\s+$', re.I)
+DIRECTION_AFTER = re.compile(r"\s+(?:of|at|to|toward|towards|winds?|gusts?|\d)\b", re.I)
+
+
+def region_noun(text, match):
+    """'the Northeast' names the region; 'moving northeast at 35 mph' or 'northeast of Nashville' is a direction."""
+    word = text[match.start():match.end()]
+    return word[:1].isupper() and not DIRECTION_BEFORE.search(text[:match.start()]) and not DIRECTION_AFTER.match(text, match.end())
+
+
 def _state_index():
     return {r['code']: r for r in regional.catalogue()['regions']}
 
@@ -70,6 +82,8 @@ def mentions(text):
         for match in re.finditer(r'(?<!\w)' + re.escape(key) + r'(?!\w)', lowered):
             if any(a < match.end() and match.start() < b for a, b in taken):
                 continue
+            if key in COMPASS and not region_noun(text, match):
+                continue  # "moving northeast at 35 mph" is a direction, not the Northeast.
             label, states, extent = REGIONS[key]
             found.append({'kind': 'region', 'name': label, 'states': states, 'extent': extent, 'start': match.start()})
             taken.append((match.start(), match.end()))

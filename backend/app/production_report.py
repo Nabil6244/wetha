@@ -8,6 +8,10 @@ import re
 from datetime import datetime, timezone
 
 FREEZE_SECONDS = 6  # Cards hold still after their reveal; only longer stillness is suspicious.
+# The first QC blackdetect fails the render on a fully black picture; the second, which tolerates
+# captions and labels, reports footage that is black apart from its overlay.
+BLACK_FRAME = r'(?m)^(?!.*Parsed_blackdetect_1).*black_start:'
+NEAR_BLACK = r'Parsed_blackdetect_1[^\n]*black_start:([\d.]+) black_end:([\d.]+)'
 
 
 def loudness_target():
@@ -25,7 +29,8 @@ def parse_qc(log):
     silences = [float(v) for v in re.findall(r'silence_duration: ([\d.]+)', log)]
     return {'integrated_lufs': float(integrated[-1]) if integrated else None,
             'true_peak_dbtp': (float(peak[-1]) if peak[-1] != '-inf' else None) if peak else None,
-            'black_intervals': len(re.findall(r'black_start:', log)),
+            'black_intervals': len(re.findall(BLACK_FRAME, log)),
+            'near_black': [(float(a), float(b)) for a, b in re.findall(NEAR_BLACK, log)],
             'freezes': freezes, 'silences': silences}
 
 
@@ -57,8 +62,12 @@ def plan_checks(timeline, media):
         decision = scene['parameters'].get('visual_decision') or {}
         if index:
             before = scenes[index - 1]['parameters'].get('visual_decision') or {}
-            same_parent = scene.get('parent_scene_id') and scene.get('parent_scene_id') == scenes[index - 1].get('parent_scene_id')
-            if decision.get('chosen') and decision.get('chosen') == before.get('chosen') and decision['chosen'] not in ('footage', 'hold') and not same_parent:
+            # Shots of one section, or a shot deliberately continuing the previous one, are one continuous picture.
+            same_parent = (scene.get('parent_scene_id') and scene.get('parent_scene_id') == scenes[index - 1].get('parent_scene_id')) \
+                or scene['parameters'].get('continues') == scenes[index - 1].get('id')
+            # The same state over a different picture (another place, another story's map) is not a repeat.
+            same_picture = scene['parameters'].get('visual_layer') == scenes[index - 1]['parameters'].get('visual_layer')
+            if decision.get('chosen') and decision.get('chosen') == before.get('chosen') and decision['chosen'] not in ('footage', 'hold') and not same_parent and same_picture:
                 findings.append(('warning', 'repeated_visual', f"Shots {index} and {index + 1} use the same {decision['chosen'].replace('_', ' ')} view."))
         if not (scene['parameters'].get('credit') or scene.get('media_id') or scene.get('cuts')):
             findings.append(('warning', 'missing_credit', f'Shot {index + 1} has no source credit line.'))
@@ -93,6 +102,8 @@ def build(job, timeline, media, qc_log, srt, advisory_lookup, timings):
         findings.append(('warning', 'loudness', f"Integrated loudness {measured['integrated_lufs']:.1f} LUFS; target {target:g} ± 2."))
     if measured['true_peak_dbtp'] is not None and measured['true_peak_dbtp'] > -0.5:
         findings.append(('warning', 'clipping', f"Peak {measured['true_peak_dbtp']:.1f} dBFS is close to clipping."))
+    for start, end in measured['near_black']:
+        findings.append(('warning', 'near_black_picture', f'Picture is black apart from labels from {start:.1f}s to {end:.1f}s.'))
     for start, end in measured['freezes']:
         if end - start >= FREEZE_SECONDS:
             findings.append(('warning', 'frozen_picture', f'Picture does not change from {start:.1f}s to {end:.1f}s.'))

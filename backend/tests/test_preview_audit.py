@@ -144,3 +144,19 @@ def test_shots_cut_on_spoken_words_and_continue_one_camera_move():
     assert spans[0][0]==0 and spans[-1][1]==1
     assert all(a[1]==b[0] for a,b in zip(spans,spans[1:]))
     assert 'word_frames' not in derived['result'] and 'snapped' in derived['result']['timing_basis']
+
+
+def test_shots_cut_where_a_clause_starts_rather_than_inside_a_phrase():
+    from app.automatic_edit import snapped, subdivide
+    from app.alignment import align
+    starts=list(range(12,252,12))
+    # The even cut at frame 84 would split "Phenix | City"; the clause after "Prattville," starts at 96.
+    assert snapped([84,84,84],starts,[96])[0]==96
+    assert snapped([84,84,84],starts)[0]==84                # no clause nearby: nearest word, as before
+    assert snapped([84,84,84],starts,[40])[0]==84           # a clause too early for the 2.5 s minimum is ignored
+    text='Flash flooding was reported this morning in Auburn, Prattville, Phenix City and nearby towns across central Alabama tonight.'
+    plan={'id':'old','scenes':[{'id':'scene','claim_id':'claim','script_segment':text,'parameters':{'source_advisory_id':'al'}}]}
+    words=[{'word':w,'start':i*.4,'end':i*.4+.3} for i,w in enumerate(text.split())]
+    new,derived,edits=subdivide(plan,{'id':'speech','result':align(plan,words,len(words)*.4)})
+    assert all(round(e['seconds']*30)>=75 for e in edits) and ' '.join(s['script_segment'] for s in new['scenes'])==text
+    assert not any(s['script_segment'].endswith('Phenix') for s in new['scenes'])

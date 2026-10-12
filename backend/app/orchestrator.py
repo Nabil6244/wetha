@@ -186,6 +186,12 @@ class Orchestrator:
                 raise ValueError('Choose the uploaded voiceover audio.')
             self.production.media_path(narration)
             self.stage(job, 'validate', 'done', f"Voiceover {narration['seconds']:.1f}s · {len(plan['scenes'])} script sections")
+            # Library clips imported before analysis would otherwise be cut blind across slates, black and camera changes.
+            if self.production.unanalyzed_media():
+                def progress(index, total, name):
+                    self.stage(job, 'plan', 'running', f'Checking library clip {index + 1} of {total} for slates, black and camera cuts')
+                analysis = await asyncio.to_thread(self.production.analyze_shots, progress)
+                job['issues'] += [{'code': 'footage_analysis', 'message': f'{name} could not be analysed; its cuts may include black or title frames.'} for name in analysis['failed']]
             # 2-3. Align, then plan shots, visuals and footage.
             body = self.base_body(job, plan)
             result = await self.prepared(job, body)

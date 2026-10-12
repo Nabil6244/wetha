@@ -21,6 +21,33 @@ def test_cuts_start_on_a_new_shot_instead_of_straddling_one():
     assert footage_library.place(clip(seconds=6, shot_starts=[1.5, 3.0, 4.5]), 0, 3.5) == 0
 
 
+def test_cuts_never_show_black_or_frozen_ranges():
+    # A NASA livestream recording: a "starting soon" slate, a fade to black, then the camera feed.
+    asset = clip(seconds=600, shot_starts=[117.7], unusable_ranges=[[0, 0.8], [0.8, 2.8]])
+    assert footage_library.place(asset, 0, 3.1) == 4       # opening skipped even though the first camera change is late
+    asset = clip(seconds=724, shot_starts=[], unusable_ranges=[[0, 2.5], [2.97, 5.6], [6.6, 61.0]])
+    assert footage_library.place(asset, 0, 3.6) == 61.2    # skips black at 3-5.6 and a static telemetry display
+    assert footage_library.place(asset, 7.6, 2.8) == 61.2
+    # Moving to the next camera shot must not land on unusable picture either.
+    asset = clip(seconds=20, shot_starts=[10.0], unusable_ranges=[[12.0, 13.0]])
+    assert footage_library.place(asset, 8, 3) == 8         # 10-13 would show the black at 12; keep the clean straddle
+    assert footage_library.place(clip(seconds=20, unusable_ranges=[[10.0, 12.0]]), 8, 3) == 12.2
+    assert footage_library.place(clip(seconds=10, unusable_ranges=[[0, 9]]), 0, 3) is None
+
+
+def test_analysis_marks_black_and_frozen_picture(tmp_path):
+    path = tmp_path / 'slate-black-feed.mp4'
+    subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=white:s=320x180:d=2:r=30',
+                    '-f', 'lavfi', '-i', 'color=c=black:s=320x180:d=1:r=30', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:d=3:r=30',
+                    '-filter_complex', '[0][1][2]concat=n=3:v=1', '-pix_fmt', 'yuv420p', str(path)], check=True)
+    result = footage_library.analyse(path, 6)
+    assert len(result['unusable_ranges']) == 1
+    start, end = result['unusable_ranges'][0]
+    assert start < .1 and 2.9 < end < 3.2                   # slate and black merge; the moving feed is usable
+    assert footage_library.place({**clip(seconds=6), **result}, 0, 2.5) >= end
+    assert footage_library.detect_shots(path, 6) == result['shot_starts']
+
+
 def test_shot_detection_finds_camera_cuts(tmp_path):
     path = tmp_path / 'two-shots.mp4'
     subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=320x180:d=2:r=30',

@@ -23,6 +23,69 @@ def plain(value):
     return ' '.join(html.unescape(re.sub(r'<[^>]*>', ' ', str(value))).split())
 
 
+# Genres and subjects that are never weather footage, whatever words they contain.
+ARCHIVE_BLOCK = re.compile(r'\b(episodes?|season \d|music ?videos?|mtv|songs?|lyrics|albums?|official video|cartoons?|anime|animat(ed|ion)|fiction|'
+    r'fan ?(made|film)|bfdi|game ?play|minecraft|roblox|sermons?|scriptures?|healing|prayers?|worship|meditation|sleep sounds?|asmr|'
+    r'8 ?mm|super ?8|cine|home ?movies?|film transfers?|transfer service|disney|trailers?|podcasts?|vlogs?|tutorials?|unboxing|weddings?|'
+    r'birthdays?|dogs?|cats?|pets?|lgbt|gay|lesbian|interviews?|conversations?|talk ?show|lectures?|speech)\b', re.I)
+# Collections whose items are news, government or stock footage rather than personal uploads.
+ARCHIVE_TRUSTED = {'tvnews', 'newsandpublicaffairs', 'nasa', 'noaa', 'prelinger', 'stock_footage', 'fedflix', 'usgovernmentdocuments', 'gov.noaa'}
+PHENOMENA = {'wind', 'rain', 'flood', 'waves', 'snow', 'lightning', 'storm', 'wildfire', 'tornado', 'hail', 'ice', 'heat', 'cold', 'drought', 'sky'}
+
+
+def _flat(value):
+    return ' '.join(value) if isinstance(value, list) else str(value or '')
+
+
+def archive_assessment(doc, files):
+    """'reject', 'review' or 'strong' for an Internet Archive item, with reasons.
+
+    Metadata keywords never prove relevance. Strong needs: a weather phenomenon in the title, two or more
+    weather topics overall, a trusted news/government/stock collection, a 720p+ MP4 of 5 s to 15 min, and a
+    verified CC BY (with a named creator) or public-domain licence. Anything short of that is review-only."""
+    title = plain(_flat(doc.get('title')));subject = _flat(doc.get('subject'));description = plain(_flat(doc.get('description')))[:3000]
+    text = ' '.join((title, subject, description));reasons = []
+    licence = _flat(doc.get('licenseurl'))
+    def verdict(kind):
+        return {'verdict': kind, 'reasons': reasons, 'licence': licence, 'text': text, 'file': best if files is not None else None,
+                'attribution': (_flat(doc.get('creator')) or 'Internet Archive contributor') + ' / Internet Archive'}
+    best = None
+    blocked = ARCHIVE_BLOCK.search(title + ' ' + subject)
+    if blocked:
+        reasons.append(f'Not weather footage: “{blocked.group(0)}” in title or subject');return verdict('reject')
+    if not (topics(title) & PHENOMENA):
+        reasons.append('No weather phenomenon in the title');return verdict('reject')
+    if not topics(subject + ' ' + description):
+        reasons.append('Weather word only in the title (often a name); subject and description are about something else');return verdict('reject')
+    if not re.search(r'creativecommons\.org/(licenses/by/[34]\.0/?$|publicdomain/(zero|mark)/|licenses/publicdomain)', licence):
+        reasons.append('Licence is not CC BY 3.0/4.0 or public domain');return verdict('reject')
+    found = topics(text)
+    if files is None:
+        return verdict('review')
+    videos = [f for f in files if f.get('name', '').endswith('.mp4') and 0 < int(f.get('size') or 0) <= MAX_DOWNLOAD]
+    if not videos:
+        reasons.append('No MP4 within the 250 MiB download limit');return verdict('reject')
+    best = max(videos, key=lambda f: (int(f.get('height') or 0), int(f.get('size') or 0)))
+    height = int(best.get('height') or 0);length = float(best.get('length') or 0)
+    if height and height < 480:
+        reasons.append(f'{height}p is below the 480p minimum');return verdict('reject')
+    if length and not 5 <= length <= 3600:
+        reasons.append(f'{length:.0f} s is outside 5 s to 60 min');return verdict('reject')
+    collections = {c.lower() for c in (doc.get('collection') if isinstance(doc.get('collection'), list) else [doc.get('collection') or ''])}
+    strong = True
+    if not collections & ARCHIVE_TRUSTED:
+        reasons.append('Personal-upload collection; needs a look before use');strong = False
+    if not height or height < 720:
+        reasons.append(f'{height or "unknown"}p; below 720p');strong = False
+    if len(found) < 2:
+        reasons.append('Only one weather topic in the metadata');strong = False
+    if not length or length > 900:
+        reasons.append('Length unknown or over 15 minutes');strong = False
+    if 'creativecommons.org/licenses/by/' in licence and not _flat(doc.get('creator')).strip():
+        reasons.append('CC BY needs a named creator for attribution; none recorded');strong = False
+    return verdict('strong' if strong else 'review')
+
+
 def safe_url(value, hosts):
     try:
         parsed = urlsplit(value)
@@ -98,6 +161,8 @@ class MediaDiscovery:
                                       headers={'User-Agent': 'WeatherIntelligenceStudio/0.5 (local media discovery)'})
         self.cache = {}
         self.stock_cache = {}
+        from .credentials import Credentials
+        self.credentials = Credentials(production.store.path.parent)
         self.lock = asyncio.Lock()
         self.seeds = json.loads((Path(__file__).parent / 'data/discovery-seeds.json').read_text())['assets']
 
@@ -189,11 +254,9 @@ class MediaDiscovery:
         except (httpx.HTTPError,ValueError,TypeError,KeyError):return [], ['NASA archive search is unavailable.']
 
     async def archive(self, body):
-        """Internet Archive video items under CC BY or public-domain terms. No key. Dated material is archival.
-
-        Only exact CC BY licence URLs and public-domain marks/dedications are accepted (no share-alike,
-        non-commercial or no-derivatives terms). A weather word must appear in the subject or description,
-        not only the title, which keeps out people and places that merely share a name."""
+        """Internet Archive: a low-priority fallback. Keyword hits only make an item a candidate; each item
+        is then assessed on genre, title, collection, media properties, and its specific licence (see
+        archive_assessment). Rejected items are dropped; 'review' items are shown but never auto-imported."""
         if body.kind == 'image' or body.provider not in ('all', 'stock'):
             return [], []
         query = re.sub(r'[^\w\s-]', ' ', body.query).strip()
@@ -201,48 +264,43 @@ class MediaDiscovery:
             return [], []
         licences = ['licenseurl:*publicdomain*'] + [f'licenseurl:"{scheme}://creativecommons.org/licenses/by/{v}/"' for scheme in ('http', 'https') for v in ('4.0', '3.0')]
         terms = ' '.join(query.split()[:4])
-        rows, warnings = [], []
+        rows = []
         try:
             docs = {}
             for licence in (licences[0], ' OR '.join(licences[1:])):
                 response = await self.client.get('https://archive.org/advancedsearch.php', params={
                     'q': f'(title:({terms}) OR subject:({terms})) AND mediatype:movies AND ({licence})',
-                    'fl[]': ['identifier', 'title', 'licenseurl', 'creator', 'date', 'subject', 'description'], 'rows': 12, 'output': 'json'})
+                    'fl[]': ['identifier', 'title', 'licenseurl', 'creator', 'date', 'subject', 'description', 'collection'], 'rows': 12, 'output': 'json'})
                 response.raise_for_status()
                 for doc in response.json().get('response', {}).get('docs', []):
                     docs.setdefault(doc['identifier'], doc)
             for doc in list(docs.values())[:10]:
-                licence = doc.get('licenseurl', '')
-                if not re.search(r'creativecommons\.org/(licenses/by/[34]\.0/?$|publicdomain/(zero|mark)/|licenses/publicdomain)', licence):
-                    continue
-                subject = doc.get('subject', '');subject = ' '.join(subject) if isinstance(subject, list) else subject
-                description = doc.get('description', '');description = ' '.join(description) if isinstance(description, list) else description
-                if not topics(subject + ' ' + plain(description)[:2000]):
-                    continue
+                if archive_assessment(doc, None)['verdict'] == 'reject':
+                    continue  # Decided from metadata alone; no need to fetch the item.
                 meta = await self.client.get(f"https://archive.org/metadata/{quote(doc['identifier'], safe='')}")
                 meta.raise_for_status();data = meta.json()
+                verdict = archive_assessment({**doc, **data.get('metadata', {})}, data.get('files', []))
+                if verdict['verdict'] == 'reject':
+                    continue
                 server, folder = data.get('d1', ''), data.get('dir', '')
                 if not re.fullmatch(r'[a-z0-9]+\.us\.archive\.org', server or ''):
                     continue
-                files = [f for f in data.get('files', []) if f.get('name', '').endswith('.mp4') and 0 < int(f.get('size') or 0) <= MAX_DOWNLOAD]
-                if not files:
-                    continue
-                best = max(files, key=lambda f: (int(f.get('height') or 0), int(f.get('size') or 0)))
-                page = f"https://archive.org/details/{doc['identifier']}"
-                public = 'publicdomain' in licence
-                creator = doc.get('creator', '');creator = ', '.join(creator) if isinstance(creator, list) else creator
+                best = verdict['file'];page = f"https://archive.org/details/{doc['identifier']}"
+                licence = verdict['licence'];public = 'publicdomain' in licence
                 title = plain(doc.get('title', 'Internet Archive video'))[:150]
+                text = verdict['text']
                 rows.append(self.remember({'title': title, 'filename': re.sub(r'[^\w.-]', '_', doc['identifier'])[:110] + '.mp4', 'kind': 'video',
                     'download_url': f"https://{server}{folder}/{quote(best['name'])}", 'catalogue_url': page, 'source': page,
                     'source_provider': 'stock', 'provider': 'archive', 'context': 'archival',
-                    'attribution': (creator or 'Internet Archive contributor') + ' / Internet Archive',
-                    'license': ('Public domain ' if public else 'CC BY ') + licence, 'reuse_basis': 'public_domain' if public else 'cc_by',
-                    'reuse_evidence': page + ' · Internet Archive item licence: ' + licence,
-                    'description': plain(description)[:1000], 'declared_date': (doc.get('date') or '')[:10] or None,
-                    'tags': sorted(topics(title + ' ' + subject + ' ' + plain(description)[:2000])), 'event_id': None, 'location': None,
-                    'captured_at': None, 'width': int(best.get('width') or 0) or None, 'height': int(best.get('height') or 0) or None,
-                    'bytes': int(best.get('size') or 0) or None, 'expected_sha1': best.get('sha1'), 'thumbnail_url': None, 'preferred_clip_seconds': 3.5}))
-            return rows, warnings
+                    'attribution': verdict['attribution'], 'license': ('Public domain ' if public else 'CC BY (attribution required) ') + licence,
+                    'reuse_basis': 'public_domain' if public else 'cc_by', 'reuse_evidence': page + ' · Internet Archive item licence: ' + licence,
+                    'description': text[:1000], 'declared_date': (doc.get('date') or '')[:10] or None,
+                    'tags': sorted(topics(text)), 'event_id': None, 'location': None, 'captured_at': None,
+                    'width': int(best.get('width') or 0) or None, 'height': int(best.get('height') or 0) or None,
+                    'seconds': float(best.get('length') or 0) or None, 'bytes': int(best.get('size') or 0) or None,
+                    'expected_sha1': best.get('sha1'), 'thumbnail_url': f"https://archive.org/services/img/{quote(doc['identifier'], safe='')}",
+                    'preferred_clip_seconds': 3.5, 'archive_verdict': verdict['verdict'], 'archive_reasons': verdict['reasons']}))
+            return rows, []
         except (httpx.HTTPError, ValueError, TypeError, KeyError):
             return rows, ['Internet Archive search is unavailable right now.']
 
@@ -251,14 +309,13 @@ class MediaDiscovery:
 
         Both licences allow free use without required attribution, but forbid implying endorsement, reselling
         unaltered files, and showing identifiable people in a bad light. Results are illustrative only."""
-        import os
         if body.kind == 'image' or body.provider not in ('all', 'stock'):
             return [], []
         jobs = []
-        if os.environ.get('PEXELS_API_KEY'):
-            jobs.append(self.pexels(body.query, os.environ['PEXELS_API_KEY']))
-        if os.environ.get('PIXABAY_API_KEY'):
-            jobs.append(self.pixabay(body.query, os.environ['PIXABAY_API_KEY']))
+        for provider, search in (('pexels', self.pexels), ('pixabay', self.pixabay)):
+            key = self.credentials.get(provider)
+            if key:
+                jobs.append(search(body.query, key))
         rows, warnings = [], []
         for found, problems in await asyncio.gather(*jobs):
             rows += found;warnings += problems
@@ -296,8 +353,12 @@ class MediaDiscovery:
                     'expected_sha1': None, 'thumbnail_url': video.get('image'), 'preferred_clip_seconds': 3.5}))
             self.stock_cache[('pexels', query.casefold())] = (time.monotonic(), rows)
             return rows, []
+        except httpx.HTTPStatusError as error:
+            code = error.response.status_code
+            return [], ['Pexels rejected the API key; paste a valid key in Settings.' if code in (400, 401, 403) else
+                        'Pexels request limit reached; try again later.' if code == 429 else f'Pexels search failed (HTTP {code}).']
         except (httpx.HTTPError, ValueError, TypeError, KeyError):
-            return [], ['Pexels search is unavailable; check PEXELS_API_KEY and the hourly request limit.']
+            return [], ['Pexels search is unavailable right now.']
 
     async def pixabay(self, query, key):
         cached = self.stock_cached(('pixabay', query.casefold()))
@@ -322,8 +383,12 @@ class MediaDiscovery:
                     'expected_sha1': None, 'thumbnail_url': best.get('thumbnail'), 'preferred_clip_seconds': 3.5}))
             self.stock_cache[('pixabay', query.casefold())] = (time.monotonic(), rows)
             return rows, []
+        except httpx.HTTPStatusError as error:
+            code = error.response.status_code
+            return [], ['Pixabay rejected the API key; paste a valid key in Settings.' if code in (400, 401, 403) else
+                        'Pixabay request limit reached; try again later.' if code == 429 else f'Pixabay search failed (HTTP {code}).']
         except (httpx.HTTPError, ValueError, TypeError, KeyError):
-            return [], ['Pixabay search is unavailable; check PIXABAY_API_KEY and the per-minute request limit.']
+            return [], ['Pixabay search is unavailable right now.']
 
     async def search(self, body):
         key = (body.query.strip().casefold(), body.provider, body.kind)
@@ -396,6 +461,8 @@ class MediaDiscovery:
             raise ValueError('This source does not have an approved media download URL.')
         # Reviewed bytes already in the library never need another download.
         existing = next((m for m in self.production.store.production_list('media') if m['checksum'] == candidate.get('checksum')), None)
+        if existing and existing.get('quarantined'):
+            raise ValueError('This file was quarantined as irrelevant; it will not be imported again.')
         if existing:
             self.production.media_path(existing)
             return {**existing, 'duplicate': True}

@@ -13,6 +13,7 @@ MAX_QUERIES=24
 DOWNLOADS=3
 MIN_FREE=2*1024**3
 ALLOWED_BASIS=('cc_by','public_domain','stock_license')
+PRIORITY={'pexels':0,'pixabay':0,'commons':1,'nasa':2,'archive':4}
 
 
 def free_space(directory):
@@ -32,36 +33,76 @@ PHRASES={
 }
 
 
+# Story-hazard shot descriptions: what footage of this kind of event looks like, by beat topic.
+HAZARD_PHRASES={
+    'tropical_cyclone':{'wind':'hurricane palm trees wind','waves':'hurricane storm surge waves','flood':'hurricane flooded street',
+        'rain':'tropical storm heavy rain','storm':'hurricane waves coast','damage':'hurricane damage houses','rescue':'hurricane rescue boat',
+        'default':['hurricane palm trees wind','hurricane storm surge waves','hurricane flooded street','tropical storm heavy rain','hurricane waves coast']},
+    'flood':{'rain':'heavy rain flooded street','default':['flooded street','flash flood water','flooded road cars']},
+    'tornado':{'default':['tornado','tornado damage','supercell storm']},
+    'severe_storm':{'default':['thunderstorm lightning','severe storm wind trees','hail storm']},
+    'winter':{'default':['snowstorm road','blizzard','ice storm']},
+    'heat':{'default':['heat wave city','heat haze road']},
+}
+HAZARD_NOUN={'tropical_cyclone':'hurricane','flood':'flooding','tornado':'tornado','severe_storm':'storm','winter':'snowstorm','heat':'heat wave'}
+
+
+def story_regions(scope,advisory,names):
+    """States for located searches: the beat first, then the advisory area, warnings and text (", FL" style codes)."""
+    regions=regional.named_regions(scope)
+    if regions:return regions
+    sources=[advisory.area or '',' '.join(getattr(advisory,'warnings',None) or []),getattr(advisory,'forecast_excerpt',None) or '']
+    for text in sources:
+        regions+=regional.named_regions(text)
+        # Marine distances such as "20 NM" are nautical miles, not New Mexico.
+        cleaned=re.sub(r'\b\d+\s*NM\b','',text)
+        regions+=[code for code in re.findall(r'(?:^|[,;(]\s*|\s)([A-Z]{2})\b',cleaned) if code in names]
+        if regions:break
+    if not regions and getattr(advisory,'provider',None)=='NWS':
+        regions=regional.named_regions(getattr(advisory,'text','') or '')
+    return list(dict.fromkeys(regions))
+
+
 def needs(plan,store):
-    """Searches built from each beat: its place, its hazard and the kind of shot it needs."""
+    """Searches built from each beat: its place, its words, the story's hazard and the kind of shot it needs."""
     from .visual_director import classify, story_text
     result={}
     names={r['code']:r['name'] for r in regional.options()}
-    for scene in plan['scenes']:
+    def add(query,regions,scene_id):
+        query=' '.join(query.split())[:160]
+        row=result.setdefault(query,{'query':query,'regions':regions,'scene_ids':[]})
+        if scene_id not in row['scene_ids']:row['scene_ids'].append(scene_id)
+    from .visual_concepts import beat_need, search_variants
+    occurrences={}
+    for index,scene in enumerate(plan['scenes']):
         scope=scene.get('source_claim_text') or scene['script_segment']
-        advisory=store.advisory(scene['parameters']['source_advisory_id'])
+        # The beat's visual concept decides what to film-search for (rotated so beats sharing a concept differ).
+        concept=beat_need(scene['script_segment'])
+        concept_queries=search_variants(concept,occurrences.get(concept,0))[:2]
+        occurrences[concept]=occurrences.get(concept,0)+1
+        advisory=store.advisory(scene['parameters'].get('source_advisory_id') or plan['advisory_id'])
         topics=sorted(media_selection.topics(scope))
-        intent=classify(scene['script_segment'],story_text(advisory)) if hasattr(advisory,'title') else {'footage_class':'phenomenon'}
+        intent=classify(scene['script_segment'],story_text(advisory)) if hasattr(advisory,'title') else {'footage_class':'phenomenon','hazard':'general'}
         # Prefer topics in the shot class the beat needs (impact beats search impact footage first).
         wanted=media_selection.SHOT_CLASSES.get(intent['footage_class'],set())
         topics=sorted(topics,key=lambda t:(t not in wanted,t))
-        if not topics:continue
-        regions=regional.named_regions(scope)
-        if not regions:
-            regions=regional.named_regions(advisory.area)
-            # Marine distances such as "20 NM" are nautical miles, not New Mexico.
-            area_codes=re.sub(r'\b\d+\s*NM\b','',advisory.area)
-            regions += [code for code in re.findall(r'\b[A-Z]{2}\b',area_codes) if code in names]
-        if not regions and getattr(advisory,'provider',None)=='NWS':
-            regions=regional.named_regions(advisory.text)
-        regions=list(dict.fromkeys(regions))
-        location=' '.join(names[r] for r in regions) or advisory.area[:80]
+        hazard=HAZARD_PHRASES.get(intent.get('hazard'))
+        if not topics and not hazard:
+            for query in concept_queries:add(query,[],scene['id'])
+            continue
+        regions=story_regions(scope,advisory,names)
+        location=' '.join(names[r] for r in regions) or (advisory.area or '')[:80]
         for topic in topics[:3]:
             # Located query first (best evidence), then the plain shot description (most stock footage is unlocated).
-            phrase=PHRASES.get(topic,[topic])[0]
-            for query,scoped in (((location+' '+topic).strip(),True),(phrase,False)):
-                row=result.setdefault(query[:160],{'query':query[:160],'regions':regions if scoped else [],'scene_ids':[]})
-                row['scene_ids'].append(scene['id'])
+            add(location+' '+topic,regions,scene['id'])
+            add(PHRASES.get(topic,[topic])[0],[],scene['id'])
+        if hazard:
+            # The story's hazard decides what the footage should look like, so a hurricane beat never searches "storm clouds" alone.
+            phrases=[hazard[t] for t in topics if t in hazard] or [hazard['default'][(index+n)%len(hazard['default'])] for n in range(2)]
+            for phrase in phrases[:2]:add(phrase,[],scene['id'])
+            if regions:add(' '.join(names[r] for r in regions[:2])+' '+HAZARD_NOUN[intent['hazard']],regions,scene['id'])
+        # Located evidence first; the beat's concrete visual searches follow.
+        for query in concept_queries:add(query,[],scene['id'])
     # Search the biggest gaps first: needs shared by the most beats.
     return sorted(result.values(),key=lambda r:-len(r['scene_ids']))
 
@@ -128,7 +169,12 @@ class FootageExpansion:
                         job['duplicates']+=1;continue
                     if candidate['kind']!='video' or candidate.get('reuse_basis') not in ALLOWED_BASIS:continue
                     if candidate.get('width') and candidate['width']<640:continue
+                    if candidate.get('provider')=='archive' and candidate.get('archive_verdict')!='strong':
+                        job.setdefault('needs_review',[]).append({'title':candidate['title'],'source':candidate['source'],'reasons':candidate.get('archive_reasons',[])})
+                        continue  # Archive items short of strong evidence are listed for review, never imported automatically.
                     eligible.append(candidate)
+                # Licensed stock first, then Wikimedia and NASA, with the Internet Archive last.
+                eligible.sort(key=lambda c:PRIORITY.get(c.get('provider'),3))
                 room=job['max_new_clips']-len(job['imported'])
                 # Bounded parallel downloads; each file still counts its real bytes against the batch budget.
                 gate=asyncio.Semaphore(DOWNLOADS)

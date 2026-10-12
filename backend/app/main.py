@@ -266,6 +266,50 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
     def alignment_status(identity: str):
         return app.state.alignment.get(identity)
 
+    @app.post('/api/production/footage-review')
+    async def footage_review(body: dict):
+        from .footage_review import run
+        return await run(app.state.discovery, str(body.get('plan_id', '')))
+
+    @app.post('/api/production/footage-reviews/{identity}/import')
+    async def footage_review_import(identity: str, body: dict):
+        from .footage_review import import_auto
+        if body.get('confirm') is not True:
+            raise ValueError('Confirm the batch import of high-confidence clips.')
+        return await import_auto(app.state.discovery, identity, int(body.get('max_clips', 8)))
+
+    @app.get('/api/production/footage-reviews/{identity}/sheet')
+    def footage_review_sheet(identity: str):
+        from uuid import UUID
+        path = app.state.production.root / 'footage-reviews' / str(UUID(identity)) / 'footage-review.jpg'
+        if not path.is_file():
+            raise KeyError(identity)
+        return FileResponse(path, media_type='image/jpeg')
+
+    @app.get('/api/settings/footage-keys')
+    def footage_key_status():
+        return app.state.discovery.credentials.status()
+
+    @app.put('/api/settings/footage-keys')
+    def save_footage_keys(body: dict):
+        values = {k: v for k, v in body.items() if k in ('pexels', 'pixabay') and isinstance(v, str)}
+        status = app.state.discovery.credentials.update(values)
+        app.state.discovery.stock_cache.clear()  # New keys must not be served stale or empty cached results.
+        return status
+
+    @app.post('/api/settings/footage-keys/test')
+    async def test_footage_keys():
+        """One small search per configured provider. Reports success or the failure reason, never the key."""
+        discovery = app.state.discovery;results = {}
+        for provider, search in (('pexels', discovery.pexels), ('pixabay', discovery.pixabay)):
+            key = discovery.credentials.get(provider)
+            if not key:
+                results[provider] = {'ok': False, 'message': 'No key saved.'};continue
+            discovery.stock_cache.pop((provider, 'storm clouds'), None)
+            rows, problems = await search('storm clouds', key)
+            results[provider] = {'ok': not problems, 'results': len(rows), 'message': problems[0] if problems else f'Connected · {len(rows)} sample results'}
+        return results
+
     @app.post('/api/visuals/spc-outlook')
     async def collect_spc_outlook(day: int = 1):
         from . import spc
@@ -312,6 +356,17 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         from .footage_library import coverage
         plan=store.visual_plan(plan_id) if plan_id else None
         return coverage(store.production_list('media'),plan,store.advisory)
+
+    @app.post('/api/production/media/{identity}/quarantine')
+    def quarantine_production_media(identity: str, body: dict):
+        reason = str(body.get('reason', '')).strip()[:300]
+        if len(reason) < 3:
+            raise ValueError('Give a reason for quarantining this clip.')
+        return app.state.production.quarantine_media(identity, reason)
+
+    @app.post('/api/production/media/{identity}/restore')
+    def restore_production_media(identity: str):
+        return app.state.production.restore_media(identity)
 
     @app.post('/api/production/media/analyze-shots')
     async def analyze_footage_shots():

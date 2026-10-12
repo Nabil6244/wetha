@@ -7,7 +7,7 @@ MAX_RUN=2
 
 
 def draft(timeline, media, advisory_lookup, unavailable=()):
-    edits=[];issues=[];short_beats=0;offsets={};last_end={};uses={};gaps={};cursor=0;footage_seconds=0;clip_count=0
+    edits=[];issues=[];excluded=[];short_beats=0;offsets={};last_end={};uses={};gaps={};cursor=0;footage_seconds=0;clip_count=0
     by_id={a['id']:a for a in media}
     reserved={s['media_id'] for s in timeline['scenes'] if s.get('media_id')} | {c['media_id'] for s in timeline['scenes'] for c in s.get('cuts',[])}
     for index,scene in enumerate(timeline['scenes']):
@@ -28,7 +28,7 @@ def draft(timeline, media, advisory_lookup, unavailable=()):
                 short_beats+=1
             else:
                 choices=media_selection.rank(scene,media,advisory_lookup(scene['parameters']['source_advisory_id']),set(unavailable)|reserved,limit=None,
-                                             allow_unverified=timeline.get('unverified_location_footage',False))
+                                             allow_unverified=timeline.get('unverified_location_footage',False),excluded=excluded)
                 proposed=[];proposed_offsets=dict(offsets);proposed_ends=dict(last_end);proposed_uses=dict(uses)
                 for length in lengths:
                     seconds=length/30
@@ -67,5 +67,6 @@ def draft(timeline, media, advisory_lookup, unavailable=()):
         issues.append({'code':'low_footage_coverage','message':f'Only {ratio:.0%} footage coverage. Target about 40%; add relevant recordings rather than repeat clips.'})
     return {'scenes':edits,'seconds':round(cursor,3),'ready':not issues,'issues':issues,
             'footage_needs':[{**g,'seconds':round(g['seconds'],1)} for g in gaps.values()],
+            'excluded_footage':media_selection.unique(excluded),
             'coverage':{'footage_clips':clip_count,'footage_seconds':round(footage_seconds,1),'footage_fraction':round(ratio,3),'short_beats_without_footage':short_beats},
             'note':'Draft only. Review source relevance and visual variety. Cuts are 2.5–5 seconds; beats under 2.5 seconds keep their graphic; source ranges do not overlap and each recording has a two-minute reuse gap.'}

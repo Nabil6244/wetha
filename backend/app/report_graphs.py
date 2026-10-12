@@ -82,6 +82,16 @@ def nws_graphs(scene, advisory):
             'note':'Ranges and thresholds from the pinned warning. Forecast and already-fallen amounts remain separate; no invented trend.'}
 
 
+PEAK_WIND = re.compile(r'peak wind forecast:\s*(\d+)\s*-\s*(\d+)\s*mph')
+
+
+def peak_wind(advisory):
+    """The warning's own 'peak wind forecast: 10-15 mph' range, or None. Threat-category ranges are ignored."""
+    from .preview_audit import canonical
+    m = PEAK_WIND.search(canonical(getattr(advisory, 'text', '') or ''))
+    return {'range': [float(m[1]), float(m[2])], 'unit': 'mph', 'quote': m[0]} if m else None
+
+
 def draw(image, data, t):
     """Transparent cards retain real imagery / geographic context behind the graphs."""
     overlay = Image.new('RGBA', image.size)

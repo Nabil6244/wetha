@@ -136,6 +136,37 @@ def test_qc_log_parsing_and_caption_checks():
     assert count == 3 and {'caption_flash', 'blank_caption'} <= codes
 
 
+def test_footage_black_under_its_label_is_reported_without_failing_the_render():
+    # Real FFmpeg output: detector 0 is a fully black picture, detector 1 tolerates on-screen labels.
+    near = '[Parsed_blackdetect_1 @ 0x11c704730] black_start:12.533333 black_end:14.133333 black_duration:1.6\n'
+    full = '[Parsed_blackdetect_0 @ 0x11c704600] black_start:3 black_end:5 black_duration:2\n'
+    assert production_report.parse_qc(near)['black_intervals'] == 0
+    assert production_report.parse_qc(near)['near_black'] == [(12.533333, 14.133333)]
+    assert production_report.parse_qc(near + full)['black_intervals'] == 1
+    import re
+    assert not re.search(production_report.BLACK_FRAME, near) and re.search(production_report.BLACK_FRAME, full)
+    report = production_report.build({'id': 'r'}, {'title': 't', 'seconds': 20, 'scenes': []}, {}, near, '', lambda i: None, {})
+    assert any(f['code'] == 'near_black_picture' and '12.5s' in f['message'] for f in report['findings'])
+
+
+def test_library_clips_are_analysed_once_before_automatic_planning(tmp_path, monkeypatch):
+    from app.storage import Store
+    from app.production import Production
+    from app import footage_library
+    store = Store(tmp_path / 'db.sqlite3');store.initialize()
+    production = Production(store, lambda s: s)
+    for digit, (identity, extra) in enumerate((('old', {'shot_starts': [2.0]}), ('done', {'shot_starts': [], 'unusable_ranges': []}), ('voice', {}))):
+        store.production_save('media', {'id': identity, 'checksum': str(digit) * 64, 'kind': 'audio' if identity == 'voice' else 'video',
+                                        'name': identity, 'filename': identity, 'seconds': 30, **extra})
+    monkeypatch.setattr(production, 'media_path', lambda asset: tmp_path / asset['filename'])
+    seen = []
+    monkeypatch.setattr(footage_library, 'analyse', lambda path, seconds: seen.append(path.name) or {'shot_starts': [2.0], 'unusable_ranges': [[0, 3.0]]})
+    assert [a['id'] for a in production.unanalyzed_media()] == ['old']
+    assert production.analyze_shots() == {'analyzed': 1, 'failed': []}
+    assert seen == ['old'] and store.production_get('media', 'old')['unusable_ranges'] == [[0, 3.0]]
+    assert production.unanalyzed_media() == []
+
+
 def test_captions_start_on_recognized_words(tmp_path):
     from app.production import Production
     stub = object.__new__(Production)
@@ -287,3 +318,66 @@ def test_place_beats_get_their_own_shot_and_layers_do_not_repeat_three_times():
 def test_place_names_resolve_to_the_right_states(text, expected):
     from app.geography import mentions
     assert [(m['name'], m['states']) for m in mentions(text)] == expected
+
+
+def test_a_compass_direction_is_never_drawn_as_a_region():
+    from app.geography import mentions
+    # From the real Oct 11 render: "moving northeast" put New England on screen for a North Carolina tornado.
+    assert mentions('It was located 10 miles north of Nashville, moving northeast at 35 miles per hour.') == []
+    assert mentions('Winds from the northeast at 20 mph.') == [] and mentions('The cell sat northeast of Raleigh.') == []
+    assert [m['name'] for m in mentions('Heavy snow spread across the Northeast tonight.')] == ['Northeast']
+    assert [m['name'] for m in mentions('Rain is falling across the Southeast and the Carolinas.')] == ['Southeast', 'Carolinas']
+
+
+def test_story_maps_keep_state_context_and_zone_alerts_frame_their_own_zones():
+    from app import broadcast
+    direction = {'scene_type': 'region_focus', 'event_id': 'x', 'duration': 4, 'headline': 'H', 'layers': [], 'sources': [], 'asset_ids': []}
+    scar = {'type': 'Feature', 'properties': {'kind': 'alert_area'},
+            'geometry': {'type': 'Polygon', 'coordinates': [[[-111.6, 33.6], [-111.3, 33.6], [-111.3, 34.0], [-111.6, 34.0], [-111.6, 33.6]]]}}
+    west, south, east, north = broadcast.Composer(direction, {'geojson': {'features': [scar]}}).bounds
+    assert east - west >= broadcast.MIN_VIEW[0] - .01 and north - south >= broadcast.MIN_VIEW[1] - .01   # a burn scar sits inside Arizona
+    # A Montana winter storm warning: no alert polygon, only its forecast-zone outlines. Never the default Southeast view.
+    zone = {'code': 'MTZ067', 'name': 'Absaroka/Beartooth Mountains',
+            'geometry': {'type': 'Polygon', 'coordinates': [[[-110.8, 45.0], [-109.5, 45.0], [-109.5, 45.6], [-110.8, 45.6], [-110.8, 45.0]]]}}
+    west, south, east, north = broadcast.Composer(direction, {'geojson': {'features': []}, 'county_shapes': [zone]}).bounds
+    assert west < -110.8 and east > -109.5 and south < 45.0 < 45.6 < north
+    assert broadcast.Composer(direction, {'geojson': {'features': []}, 'county_shapes': [zone]}).frame(.5).size == (1920, 1080)
+
+
+def test_camera_moves_name_their_story_and_extra_moves_continue_the_previous_shot():
+    from datetime import datetime, timezone
+    from app import broadcast
+    from app.visual_states import assign, story_headline, CONTINUE_SECONDS
+    issued = datetime(2026, 10, 11, 18, 4, tzinfo=timezone.utc)
+    story = SimpleNamespace(id='az', title='Flash Flood Warning', event_key='urn:az', forecast_excerpt='', warnings=[], provider='NWS',
+                            area='Gila, AZ; Maricopa, AZ', text='', issued_at=issued, expires_at=None, facts={}, source_payload={})
+    assert story_headline(story) == 'FLASH FLOOD WARNING · GILA & MARICOPA, AZ'
+    assert story_headline(SimpleNamespace(title='Tornado Watch', area='Edgecombe, NC; Halifax, NC; Nash, NC; Warren, NC')) == 'TORNADO WATCH · 4 COUNTIES, NC'
+    area = {'type': 'Feature', 'properties': {'kind': 'alert_area'},
+            'geometry': {'type': 'Polygon', 'coordinates': [[[-111.6, 33.6], [-111.3, 33.6], [-111.3, 34.0], [-111.6, 34.0], [-111.6, 33.6]]]}}
+    scenes = []
+    for i in range(6):
+        scene = {'id': f's{i}', 'type': 'region_focus', 'script_segment': 'Conditions continued in the area.', 'seconds': 3, 'media_id': None,
+                 'cuts': [], 'map_mode': 'auto', 'graphic_style': 'auto', 'parameters': {'source_advisory_id': 'az', 'geojson': {'features': [area]}, 'credit': 'NWS'}}
+        scene['direction'] = broadcast.director(scene, 'urn:az', 3)
+        scenes.append(scene)
+    states = assign(scenes, {'az': story}.get)
+    moves = [s for s in scenes if s['parameters'].get('visual_state') in ('wide', 'pan', 'push_in', 'pull_out') and not s['parameters'].get('continues')]
+    assert len(moves) <= 2 and all(s['direction']['headline'] == 'FLASH FLOOD WARNING · GILA & MARICOPA, AZ' for s in moves)
+    continued = [s for s in scenes if s['parameters'].get('continues')]
+    assert continued
+    # A plain hold appears only once a continuous shot has reached the map-hold limit.
+    for i, state in enumerate(states):
+        if state == 'hold':
+            j = i - 1
+            while scenes[j]['parameters'].get('continues'):
+                j -= 1
+            assert sum(s['seconds'] for s in scenes[j:i + 1]) > CONTINUE_SECONDS
+    for scene in continued:
+        before = next(s for s in scenes if s['id'] == scene['parameters']['continues'])
+        assert scene['direction'] == before['direction'] and before['parameters']['camera_span'][1] == scene['parameters']['camera_span'][0]
+    # One continuous shot never runs past the map-hold limit.
+    runs, run = [], 0
+    for scene in scenes:
+        run = run + scene['seconds'] if scene['parameters'].get('continues') else scene['seconds'];runs.append(run)
+    assert max(runs) <= CONTINUE_SECONDS

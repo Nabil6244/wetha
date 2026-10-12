@@ -40,7 +40,7 @@ HAZARDS = [
     ('tornado', r'\b(tornado\w*|twister|supercell)\b'),
     ('severe_storm', r'\b(severe thunderstorm\w*|thunderstorm\w*|hail\w*|damaging winds?|lightning)\b'),
     ('flood', r'\b(flood\w*|surge|inundat\w*)\b'),
-    ('winter', r'\b(snow\w*|blizzard\w*|ice storm|freezing rain|sleet)\b'),
+    ('winter', r'\b(snow\w*|blizzard\w*|ice storm|freezing rain|sleet|winter storm|winter weather)\b'),  # Alert titles name the hazard.
     ('heat', r'\b(heat\w*|record high|hot)\b'),
     ('cold', r'\b(cold\w*|wind chill|freez\w*|frigid)\b'),
     ('wildfire', r'\b(wildfire\w*|fire weather|red flag)\b'),

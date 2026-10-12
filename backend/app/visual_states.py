@@ -21,7 +21,10 @@ STATES = {
     'advisory_timeline': ('card', 5), 'source_card': ('card', 1), 'severe_outlook': ('map', 7),
     'place_focus': ('map', 6), 'county_focus': ('map', 5), 'warning_card': ('card', 6),
     'radar_loop': ('observation', 8), 'satellite_loop': ('observation', 7),
+    'warning_timeline': ('card', 6), 'zone_compare': ('card', 6),
 }
+CAMERA_CAP = 2      # Camera-only moves over one story's map, per story.
+TIME_CUES = re.compile(r'\b(until|expir\w*|in effect|through \d|\d\s*[ap]\.?m\.?|tonight|this (?:morning|afternoon|evening))', re.I)
 CAMERA_ONLY = {'wide', 'pan', 'push_in', 'pull_out', 'track_follow'}  # Moves over the same story map.
 NWS_COLORS = {'Tornado Warning': '#ff2a2a', 'Severe Thunderstorm Warning': '#ffa500', 'Flash Flood Warning': '#b22222',
               'Flood Warning': '#00c853', 'Storm Surge Warning': '#b524f7', 'Special Marine Warning': '#ffa500',
@@ -142,6 +145,13 @@ def candidates(scene, advisory):
         rows.append(('radar_loop', ','.join(p['radar_option'].get('frames', [])[-2:]) or story, 5 if re.search(r'\b(rain\w*|storm\w*|thunder\w*|radar|downpour\w*|shower\w*|squall\w*)\b', text, re.I) else 2))
     if p.get('satellite_option'):
         rows.append(('satellite_loop', ','.join(p['satellite_option'].get('frames', [])[-2:]) or story, 4 if re.search(r'\b(clouds?|system|satellite|organiz\w*|develop\w*|storm)\b', text, re.I) else 1))
+    if getattr(advisory, 'provider', '') == 'NWS' and getattr(advisory, 'expires_at', None) and advisory.expires_at > advisory.issued_at and TIME_CUES.search(text):
+        rows.append(('warning_timeline', story, 6))
+    compare = p.get('zone_compare')
+    if compare and re.search(r'\bwinds?\b', text, re.I) and any(
+            re.search(r'(?<!\w)' + re.escape(r['label'].split(',')[0].replace('Coastal ', '')) + r'(?!\w)', text, re.I)
+            or any(re.search(r'(?<![\d.])' + f'{v:g}' + r'(?![\d.])', text) for v in r['range']) for r in compare['rows']):
+        rows.append(('zone_compare', story + ':wind', 6))
     if p.get('outlook'):
         rows.append(('severe_outlook', story + p['outlook']['id'], 3 if re.search(r'\b(tornado\w*|severe|thunderstorm\w*|hail|damaging winds?)\b', text, re.I) else 0))
     rows.append(('source_card', story, 0))
@@ -151,11 +161,13 @@ def candidates(scene, advisory):
 def apply(scene, state, key, advisory):
     p = scene['parameters'];direction = scene['direction'];camera = {'movement': 'camera_drift', 'easing': 'smoothstep'}
     p.pop('camera_span', None)  # A new state is a real cut; its motion runs from the start.
-    for stale in ('visual_state', 'focus_coord', 'focus_label', 'state_quote', 'state_facts', 'state_places', 'place_warning', 'warning_card', 'spoken_counties'):
+    for stale in ('visual_state', 'focus_coord', 'focus_label', 'state_quote', 'state_facts', 'state_places', 'place_warning', 'warning_card', 'spoken_counties', 'graphic_style', 'graphic_data'):
         p.pop(stale, None)
     p['visual_state'] = state
     if state in HEADLINES:
         direction['headline'] = HEADLINES[state]
+    if state in CAMERA_ONLY and state != 'track_follow' and advisory is not None and getattr(advisory, 'title', None):
+        direction['headline'] = story_headline(advisory)
     track = records(p)
     if state == 'wide':
         camera.update(start_zoom=1, end_zoom=1.05)
@@ -203,6 +215,19 @@ def apply(scene, state, key, advisory):
     elif state == 'warning_card':
         p['warning_card'] = warning_details(advisory)
         direction['headline'] = p['warning_card']['event'].upper()[:60]
+    elif state in ('warning_timeline', 'zone_compare'):
+        if state == 'warning_timeline':
+            card = warning_details(advisory)
+            data = {'event': card['event'], 'office': card['office'], 'color': card['color'],
+                    'issued_at': advisory.issued_at.isoformat(), 'expires_at': advisory.expires_at.isoformat()}
+            direction['headline'] = 'WHEN THE WARNING RUNS'
+        else:
+            data = {**p['zone_compare'], 'rows': [{**r, 'own': r['advisory_id'] == p.get('source_advisory_id')} for r in p['zone_compare']['rows']]}
+            direction['headline'] = 'PEAK WIND FORECAST BY ZONE'
+        # Drawn by the existing graphic-style renderer; the card covers the map, no imagery underneath.
+        p['graphic_style'] = state;p['graphic_data'] = data;p.pop('map_mode', None)
+        direction.update(scene_type='region_focus', asset_ids=[], layers=[], fallback=None)
+        return
     elif state in ('radar_loop', 'satellite_loop'):
         option = p['radar_option' if state == 'radar_loop' else 'satellite_option']
         scene['direction'] = copy.deepcopy(option['direction'])
@@ -236,58 +261,149 @@ def apply(scene, state, key, advisory):
 def assign(scenes, advisory_lookup):
     """Pick a state per shot: never the same state within WINDOW shots, never two cards in a row,
     never the same card content for a story within CONTENT_WINDOW shots."""
-    history = [];content = [];usage = {};layers = [];shown = {}
+    history = [];content = [];usage = {};layers = [];shown = {};camera = {};last_places = set();chain = []
+    comparisons = zone_comparisons(scenes, advisory_lookup)
     for scene in scenes:
         if not eligible(scene):
+            chain = []
             family = family_of(scene)
             history.append((family, family));content.append(None)
             layers.append(layer_of('footage', '', scene) if family == 'footage' else family)
             continue
         advisory = advisory_lookup(scene['parameters'].get('source_advisory_id'))
+        story = scene['parameters'].get('source_advisory_id', '')
+        if story in comparisons:
+            scene['parameters']['zone_compare'] = comparisons[story]
         intent = visual_director.classify(scene['script_segment'], visual_director.story_text(advisory))
         scene['parameters']['visual_intent'] = intent
         recent_states = {s for s, _ in history[-WINDOW:]}
         recent_content = set(c for c in content[-CONTENT_WINDOW:] if c)
         previous_family = history[-1][1] if history else None
-        best = None;scored = [];offered = candidates(scene, advisory)
-        for state, key, cue in offered:
-            family, base = STATES[state]
-            # Each named place is new content, so place shots are limited by repeating the same place, not the state.
-            if (state in recent_states and state != 'place_focus') or (state, key) in recent_content:
-                continue
-            if family == 'observation' and shown.get((state, key), 0) >= 2:
-                continue  # The same radar or satellite frames at most twice per video, whichever story cites them.
-            if family in ('card', 'split') and previous_family in ('card', 'split', 'chart'):
-                continue
-            layer = layer_of(state, key)
-            if len(layers) >= 2 and layers[-1] == layers[-2] == layer:
-                continue  # Never a third consecutive shot of the same underlying picture.
-            if layers and layers[-1] == layer and state not in ('place_focus',):
-                cue -= 5  # A camera move over the same picture is not a new visual.
-            # Meaning first: states the narration calls for outrank generic variety.
-            fit = visual_director.bonus(state, intent)
-            score = base + cue + fit - usage.get(state, 0) * 1.5 - (3 if family == previous_family else 0)
-            scored.append((score, state, fit))
-            if best is None or score > best[0]:
-                best = (score, state, key)
+        offered = candidates(scene, advisory)
+        # A capped camera move is a fallback, used only when no other new picture qualifies.
+        for relaxed in (False, True):
+            best = None;scored = []
+            for state, key, cue in offered:
+                family, base = STATES[state]
+                # Each named place is new content, so place shots are limited by repeating the same place, not the state.
+                if (state in recent_states and state != 'place_focus') or (state, key) in recent_content:
+                    continue
+                if not relaxed and state in CAMERA_ONLY and (camera.get(story, 0) >= CAMERA_CAP or (history and history[-1][0] in CAMERA_ONLY)):
+                    continue  # Another move over the same map is not a new picture.
+                if not relaxed and state == 'place_focus' and history and history[-1][0] == 'place_focus' and \
+                        last_places & {c for m in geography.mentions(scene['script_segment']) if m['name'] in key.split('|') for c in m['states']}:
+                    continue  # Back-to-back outlines of the same state read as one view; different places still get their own shot.
+                if family == 'observation' and shown.get((state, key), 0) >= 2:
+                    continue  # The same radar or satellite frames at most twice per video, whichever story cites them.
+                if family in ('card', 'split') and previous_family in ('card', 'split', 'chart'):
+                    continue
+                layer = layer_of(state, key)
+                if len(layers) >= 2 and layers[-1] == layers[-2] == layer:
+                    continue  # Never a third consecutive shot of the same underlying picture.
+                if layers and layers[-1] == layer and state not in ('place_focus',):
+                    cue -= 5  # A camera move over the same picture is not a new visual.
+                # Meaning first: states the narration calls for outrank generic variety.
+                fit = visual_director.bonus(state, intent)
+                score = base + cue + fit - usage.get(state, 0) * 1.5 - (3 if family == previous_family else 0)
+                scored.append((score, state, fit))
+                if best is None or score > best[0]:
+                    best = (score, state, key)
+            if best:
+                break
         scored.sort(key=lambda r: -r[0])
         scene['parameters']['state_meta'] = {'available': sorted({s for s, _, _ in offered}),
             'alternatives': [{'state': s, 'score': round(v, 1)} for v, s, _ in scored[1:4]]}
+        if (best is None or (relaxed and best[1] in CAMERA_ONLY)) and chain and history and history[-1][1] == 'map' \
+                and chain[-1]['parameters'].get('source_advisory_id', '') == story \
+                and sum(s['seconds'] for s in chain) + scene['seconds'] <= CONTINUE_SECONDS:
+            # The only new picture left is another move over the same map: keep the previous shot running instead.
+            continue_shot(chain, scene)
+            chain.append(scene);history.append(history[-1]);content.append(None);layers.append(layers[-1])
+            scene['parameters']['visual_layer'] = layers[-1]
+            continue
         if best is None:
             # Nothing new is available: hold the previous motion rather than repeat a look.
-            history.append(('hold', 'map'));content.append(None);layers.append('story_map')
+            history.append(('hold', 'map'));content.append(None);layers.append('story_map');chain = [scene]
             continue
         _, state, key = best
         fit = next(f for _, s, f in scored if s == state)
         scene['parameters']['state_meta'].update(chosen=state, fallback='Regional overview map',
             reason=(f"{state.replace('_', ' ').capitalize()} suits a {intent['intent']} beat and its evidence exists" if fit else
                     f"{state.replace('_', ' ').capitalize()}: the most varied evidence-backed view; the preferred views were used recently or lack data"))
-        apply(scene, state, key, advisory)
+        apply(scene, state, key, advisory);chain = [scene]
         usage[state] = usage.get(state, 0) + 1;shown[(state, key)] = shown.get((state, key), 0) + 1
+        if state in CAMERA_ONLY:
+            camera[story] = camera.get(story, 0) + 1
+        last_places = {c for m in scene['parameters'].get('state_places', []) for c in m['states']} if state == 'place_focus' else set()
         history.append((state, STATES[state][0]));layers.append(layer_of(state, key))
         scene['parameters']['visual_layer'] = layers[-1]
         content.append((state, key) if STATES[state][0] != 'map' or state in ('place_callout', 'place_focus') else None)
     return [h[0] for h in history]
+
+
+CONTINUE_SECONDS = 10  # Longest single map shot made by continuing the previous one (the map-hold limit).
+CONTINUED = ('visual_state', 'focus_coord', 'focus_label', 'state_quote', 'state_facts', 'state_places', 'place_warning',
+             'warning_card', 'spoken_counties', 'graphic_style', 'graphic_data', 'bounds')
+
+
+def continue_shot(chain, scene):
+    """Show the previous shot's picture on this beat and spread one camera move across the whole run,
+    so consecutive beats read as one continuous shot rather than repeated re-framings of a map."""
+    last = chain[-1];p = scene['parameters']
+    for key in CONTINUED:
+        p.pop(key, None)
+        if key in last['parameters']:
+            p[key] = copy.deepcopy(last['parameters'][key])
+    scene['direction'] = copy.deepcopy(last['direction']);p['continues'] = last['id']
+    total = sum(s['seconds'] for s in chain) + scene['seconds'];cursor = 0
+    for shot in [*chain, scene]:
+        shot['parameters']['camera_span'] = [round(cursor / total, 6), round((cursor + shot['seconds']) / total, 6)]
+        cursor += shot['seconds']
+    p['state_meta'] = {**p.get('state_meta', {}), 'chosen': p.get('visual_state', 'hold'), 'continued_from': last['id'],
+                       'reason': 'Continues the previous map shot: the only other picture left was another move over the same map'}
+
+
+def zone_comparisons(scenes, advisory_lookup):
+    """Story -> its warning's peak wind forecast beside the same product's other zones issued at the same time.
+    Only explicitly quoted ranges are compared; a story without one is left out, never estimated."""
+    from .report_graphs import peak_wind
+    groups = {}
+    # Stories in this video: each shot's own story and the sources its beat cites.
+    cited = [i for s in scenes for i in [s['parameters'].get('source_advisory_id'), *s.get('source_advisory_ids', [])] if i]
+    for identity in dict.fromkeys(cited):
+        advisory = advisory_lookup(identity)
+        if getattr(advisory, 'provider', '') != 'NWS':
+            continue
+        value = peak_wind(advisory)
+        if value:
+            key = (advisory.title.split(' issued')[0], advisory.issued_at)
+            groups.setdefault(key, []).append({'advisory_id': identity, 'label': advisory.area or identity, **value})
+    result = {}
+    for (event, issued), rows in groups.items():
+        if len(rows) < 2:
+            continue
+        rows = sorted(rows, key=lambda r: (-r['range'][1], r['label']))[:8]
+        data = {'title': 'Peak wind forecast by zone · mph', 'subtitle': f'{event}s issued {issued:%d %b %Y %H:%M UTC}', 'rows': rows}
+        for r in rows:
+            result[r['advisory_id']] = data
+    return result
+
+
+def story_headline(advisory):
+    """'FLASH FLOOD WARNING · GILA & MARICOPA, AZ': what the map shows, from the alert's own title and area."""
+    event = advisory.title.split(' issued')[0].upper()
+    parts = [a.strip() for a in (getattr(advisory, 'area', None) or '').split(';') if a.strip()]
+    counties = [re.fullmatch(r'(.+?),\s*([A-Z]{2})', a) for a in parts]
+    if parts and all(counties) and len({m.group(2) for m in counties}) == 1:
+        names = [m.group(1).upper() for m in counties];state = counties[0].group(2)
+        area = (' & '.join(names) if len(names) <= 2 else f'{len(names)} COUNTIES') + ', ' + state
+    else:
+        area = parts[0].upper() if parts else ''
+    headline = event + (' · ' + area if area else '')
+    headline = headline if len(headline) <= 60 else headline[:59].rstrip() + '…'
+    # The renderer refuses headlines over its 8-word on-screen budget (a long marine-zone area would fail the render).
+    words = headline.split()
+    return headline if len(words) <= 8 else ' '.join(words[:7]) + '…'
 
 
 def warning_details(advisory):
@@ -397,7 +513,7 @@ def transitions(scenes):
         footage = lambda s: s.get('media_id') or s.get('cuts')
         if footage(scene) or footage(previous) or 'fade' in (scene.get('transition'), previous.get('transition')):
             continue
-        if scene['parameters'].get('camera_span') and scene.get('parent_scene_id') and scene.get('parent_scene_id') == previous.get('parent_scene_id'):
+        if scene['parameters'].get('continues') or (scene['parameters'].get('camera_span') and scene.get('parent_scene_id') and scene.get('parent_scene_id') == previous.get('parent_scene_id')):
             continue
         before, after = family_of(previous), family_of(scene)
         if previous['parameters'].get('source_advisory_id') != scene['parameters'].get('source_advisory_id'):

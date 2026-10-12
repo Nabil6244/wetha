@@ -81,7 +81,10 @@ def test_regional_catalog_save_timeline_and_retry_keep_reviewed_location(tmp_pat
         assert saved.status_code==200,saved.text
         snapshot=saved.json();assert snapshot['scenes'][0]['regional_relevance']['regions']==['FL']
         assert snapshot['scenes'][0]['selection_catalog']['location_reviewed']
+        # Reviewed in a comparable state (same coverage group): a labelled fallback. In an unrelated state: refused.
         client.put(url,json={**metadata,'region_codes':['NC']})
+        assert client.post('/api/production/check',json=body).json()['ready']
+        client.put(url,json={**metadata,'region_codes':['CA']})
         assert not client.post('/api/production/check',json=body).json()['ready']
         validated,_=app.state.production.validate_timeline(snapshot)
         assert validated['scenes'][0]['selection_catalog']['region_codes']==['FL']
@@ -97,3 +100,23 @@ def test_regional_discovery_does_not_offer_unlocated_stock_as_florida(tmp_path):
         assert result['required_regions']==['FL']
         assert result['results']==[]
         assert 'Florida%20storm%20rain' in result['links']['pexels']
+
+
+def test_selector_prefers_local_reviewed_footage_and_labels_comparable_region_fallback():
+    from types import SimpleNamespace
+    from datetime import datetime,timezone
+    from app import media_selection
+    advisory=SimpleNamespace(provider='NWS',title='Flash Flood Warning',event_key='x',issued_at=datetime(2026,10,10,tzinfo=timezone.utc),forecast_excerpt='',area='')
+    def clip(identity,**catalog):
+        return {'id':identity,'kind':'video','name':identity+'.mp4','seconds':30,'rights_confirmed':True,'context':'illustrative','attribution':'A',
+                'source':'https://example.org/'+identity,'width':1920,'catalog':{'tags':['flood','rain','storm'],**catalog}}
+    florida=clip('florida',location='Bradenton, Florida',region_codes=['FL'],location_reviewed=True,reference='https://example.org/fl')
+    california=clip('california',location='California')
+    generic=clip('generic')
+    oregon=clip('oregon',location='Portland, Oregon',region_codes=['OR'],location_reviewed=True,reference='https://example.org/or')
+    beat=lambda text:{'id':'s','script_segment':text,'parameters':{}}
+    ranked=media_selection.rank(beat('Heavy rain flooded roads across Florida.'),[california,generic,florida],advisory,limit=None,allow_unverified=True)
+    assert [r['media_id'] for r in ranked]==['florida','generic','california']
+    # Alabama story: the Florida footage is a comparable-region fallback, labelled; Oregon footage is never used.
+    ranked=media_selection.rank(beat('Heavy rain flooded roads across Alabama.'),[florida,oregon],advisory,limit=None,allow_unverified=True)
+    assert [r['media_id'] for r in ranked]==['florida'] and ranked[0]['location_status']=='nearby' and 'Filmed in Bradenton, Florida' in ranked[0]['reasons'][0]

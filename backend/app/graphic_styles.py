@@ -103,4 +103,30 @@ def draw(image,style,data,t):
         label(d,(205,540),data['title'][:60],48)
         label(d,(205,650),stamp.strftime('%d %b %Y / %H:%M UTC').upper(),60)
         d.line((205,800,205+1490*u,800),fill='#65e1d1',width=7)
+    elif style=='warning_timeline':
+        issued=datetime.fromisoformat(data['issued_at']);expires=datetime.fromisoformat(data['expires_at'])
+        minutes=round((expires-issued).total_seconds()/60)
+        label(d,(105,215),data['event'].upper(),50,data['color'])
+        label(d,(108,290),'ISSUED BY '+data['office'].upper(),28,'#a8c4d0')
+        d.rounded_rectangle((150,470,1770,530),radius=30,fill='#1b3846')
+        d.rounded_rectangle((150,470,150+max(60,1620*u),530),radius=30,fill=data['color'])
+        for x,tag,stamp in ((150,'ISSUED',issued),(1770,'EXPIRES',expires)):
+            anchor=x if tag=='ISSUED' else x-420
+            label(d,(anchor,575),tag,28,'#a8c4d0');label(d,(anchor,620),stamp.strftime('%H:%M UTC'),78)
+            label(d,(anchor,715),stamp.strftime('%d %b %Y'),30,'#a8c4d0')
+        if t>.35:label(d,(150,780),f'In effect {minutes//60} h {minutes%60:02d} min, as issued · times from the NWS alert record',34,'#ffffff')
+    elif style=='zone_compare':
+        rows=data['rows'];top=max(r['range'][1] for r in rows)*1.15
+        label(d,(105,205),data['title'].upper(),44,'#65e1d1')
+        label(d,(108,268),data['subtitle'],26,'#a8c4d0')
+        step=min(62,480/len(rows))
+        for i,r in enumerate(rows):
+            y=340+i*step;lo,hi=r['range'];own=r['own']
+            label(d,(105,y),r['label'].upper()[:22],30 if own else 26,'#ffffff' if own else '#a8c4d0')
+            d.rectangle((560,y+8,1560,y+40),fill='#16303d')
+            reveal=easing(min(1,max(0,t*2.2-i*.08)))
+            x0=560+1000*lo/top;x1=560+1000*hi/top
+            d.rectangle((x0,y+8,x0+(x1-x0)*reveal,y+40),fill='#65e1d1' if own else '#3f8fa0')
+            if reveal>.5:label(d,(1590,y+2),f'{lo:g}–{hi:g}',34,'#65e1d1' if own else '#ecf6fa')
+        label(d,(105,845),'Each range quoted from its own warning: "peak wind forecast" · same issue time · not measured winds',24,'#a8c4d0')
     else:raise ValueError('Unknown graphic style.')

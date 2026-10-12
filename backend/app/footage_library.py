@@ -6,28 +6,58 @@ from . import media_selection, regional
 
 SCENE_THRESHOLD = 0.32
 EDGE = .05  # A cut may touch a shot change, not straddle one.
+RECOVER = .2  # Pictures fade back in after black or a slate; start a little after the range ends.
 
 
-def detect_shots(path, seconds):
-    """Times of internal camera cuts. Decoded at low resolution; None when FFmpeg cannot analyse."""
+def analyse(path, seconds):
+    """Internal camera cuts and unusable ranges, from one low-resolution decode.
+
+    Unusable ranges are black (fades, gaps between segments) or frozen picture (title slates,
+    "starting soon" cards, static telemetry displays): never usable as moving footage. Returns
+    {'shot_starts', 'unusable_ranges'}, or None when FFmpeg cannot analyse."""
     executable = shutil.which('ffmpeg')
     if not executable:
         return None
     try:
         result = subprocess.run([executable, '-hide_banner', '-nostats', '-protocol_whitelist', 'file,pipe', '-i', str(path),
-                                 '-vf', f"scale=320:-2,select='gt(scene,{SCENE_THRESHOLD})',showinfo", '-an', '-f', 'null', '-'],
+                                 '-vf', f"scale=320:-2,blackdetect=d=0.2:pix_th=0.06,freezedetect=n=0.001:d=1.5,select='gt(scene,{SCENE_THRESHOLD})',showinfo",
+                                 '-an', '-f', 'null', '-'],
                                 capture_output=True, text=True, timeout=max(60, seconds * 2))
     except subprocess.SubprocessError:
         return None
     if result.returncode:
         return None
-    times = sorted({round(float(t), 3) for t in re.findall(r'pts_time:([0-9.]+)', result.stderr)})
+    log = result.stderr
+    times = sorted({round(float(t), 3) for t in re.findall(r'pts_time:([0-9.]+)', log)})
     # Changes closer than half a second are flashes or dissolves, not separate shots.
     shots = []
     for t in times:
         if 0.5 < t < seconds - 0.5 and (not shots or t - shots[-1] >= .5):
             shots.append(t)
-    return shots
+    ranges = [(float(a), float(b)) for a, b in re.findall(r'black_start:([0-9.]+) black_end:([0-9.]+)', log)]
+    freezes = re.findall(r'freeze_(start|end): ([0-9.]+)', log)
+    start = None
+    for kind, value in freezes:
+        if kind == 'start':
+            start = float(value)
+        elif start is not None:
+            ranges.append((start, float(value)));start = None
+    if start is not None:
+        ranges.append((start, seconds))  # Frozen until the end of the recording.
+    # Merge overlapping ranges and the brief flickers between them (a static display that updates).
+    merged = []
+    for a, b in sorted(ranges):
+        if merged and a - merged[-1][1] < .5:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    return {'shot_starts': shots, 'unusable_ranges': [[round(a, 3), round(b, 3)] for a, b in merged]}
+
+
+def detect_shots(path, seconds):
+    """Times of internal camera cuts. Decoded at low resolution; None when FFmpeg cannot analyse."""
+    result = analyse(path, seconds)
+    return result and result['shot_starts']
 
 
 def place(asset, start, seconds):
@@ -37,11 +67,20 @@ def place(asset, start, seconds):
     shot is long enough, the plain start is used; a cut never loops or overlaps an earlier range."""
     limit = asset['seconds'] + .01
     changes = asset.get('shot_starts') or []
+    unusable = asset.get('unusable_ranges') or []
     # Openings are often slates, titles or countdowns: skip the first camera shot of a longer clip,
-    # or at least the first few seconds when no shot analysis exists.
+    # or at least the first few seconds when shot analysis found no early camera change.
     if (asset.get('seconds') or 0) > 20:
-        opening = next((c for c in changes if c <= 15), None) if changes else min(4, asset['seconds'] * .1)
-        start = max(start, opening or 0)
+        opening = next((c for c in changes if c <= 15), None) or min(4, asset['seconds'] * .1)
+        start = max(start, opening)
+    # Black and frozen picture are never footage: a cut may not show any part of them.
+    def clear(at):
+        for a, b in unusable:
+            if a < at + seconds - EDGE and b + RECOVER > at + EDGE:
+                return b + RECOVER
+        return None
+    while (after := clear(start)) is not None:
+        start = after
     if start + seconds > limit:
         return None
     candidate = start
@@ -49,9 +88,10 @@ def place(asset, start, seconds):
         if change <= candidate + EDGE:
             continue
         if change < candidate + seconds - EDGE:
-            candidate = change  # Straddles a cut: start on the new shot instead.
-            if candidate + seconds > limit:
+            # Straddles a cut: start on the new shot instead, if that range is clean.
+            if change + seconds > limit or clear(change) is not None:
                 return start
+            candidate = change
             continue
         break
     return candidate
@@ -79,7 +119,7 @@ def usable_cuts(asset, seconds=3.5):
 
 def coverage(media, plan=None, advisory_lookup=None):
     """What the library holds by topic, region, context and event, and where a plan's needs exceed it."""
-    visual = [a for a in media if a['kind'] in ('video', 'image') and a.get('rights_confirmed')]
+    visual = [a for a in media if a['kind'] in ('video', 'image') and a.get('rights_confirmed') and not a.get('quarantined')]
     names = {r['code']: r['name'] for r in regional.options()}
     by_topic, by_region, by_context, by_event = {}, {}, {}, {}
     def add(table, key, asset):
@@ -121,7 +161,7 @@ def gaps(plan, assets, advisory_lookup):
         wanted = media_selection.topics(scene.get('source_claim_text') or scene['script_segment'])
         if not wanted:
             continue
-        advisory = advisory_lookup(scene['parameters']['source_advisory_id'])
+        advisory = advisory_lookup(scene['parameters'].get('source_advisory_id') or plan.get('advisory_id'))
         matching = media_selection.rank(scene, assets, advisory, limit=None)
         regions = regional.targets(scene)
         key = (tuple(sorted(regions)), tuple(sorted(wanted)))

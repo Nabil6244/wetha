@@ -1,12 +1,14 @@
 """Subdivide aligned narration into visual shots without retranscribing audio."""
 import copy
 import math
+import re
 from uuid import uuid4
 from .storage import now
 
 MIN_SHOT = 75   # 2.5 seconds; shorter internal cuts read as flashes.
 MAX_SHOT = 120  # 4 seconds.
 SNAP = 15       # Move a cut up to half a second to land on a spoken word.
+PHRASE = 30     # Or up to a second to land where a new clause starts, so a shot never splits a phrase.
 
 
 def shot_frames(frames):
@@ -15,8 +17,9 @@ def shot_frames(frames):
     return [frames//count+(1 if i<frames%count else 0) for i in range(count)]
 
 
-def snapped(lengths, starts):
-    """Move each internal cut to the nearest word start while keeping shot limits."""
+def snapped(lengths, starts, clauses=()):
+    """Move each internal cut to the nearest clause start (a word after punctuation) within a second,
+    else the nearest word start within half a second, while keeping shot limits."""
     total=sum(lengths);cuts=[];cursor=0
     for length in lengths[:-1]:
         cursor+=length
@@ -25,7 +28,8 @@ def snapped(lengths, starts):
         low=max(previous+MIN_SHOT,total-MAX_SHOT*remaining)
         high=min(previous+MAX_SHOT,total-MIN_SHOT*remaining)
         target=min(high,max(low,cursor))
-        options=[s for s in starts if max(low,cursor-SNAP)<=s<=min(high,cursor+SNAP)]
+        options=[s for s in clauses if max(low,cursor-PHRASE)<=s<=min(high,cursor+PHRASE)]
+        options=options or [s for s in starts if max(low,cursor-SNAP)<=s<=min(high,cursor+SNAP)]
         cuts.append(min(options,key=lambda s:abs(s-cursor)) if options else target)
     bounds=[0,*cuts,total]
     return [b-a for a,b in zip(bounds,bounds[1:])]
@@ -43,7 +47,8 @@ def subdivide(plan, job):
         starts=spoken.get(scene['id']) if len(spoken.get(scene['id'],[]))==len(words) else None
         lengths=shot_frames(frames)
         if starts and len(lengths)>1:
-            lengths=snapped(lengths,sorted(set(starts[1:])))
+            clauses=[s for word,s in zip(words,starts[1:]) if re.search(r'[,.;:!?—]["”’)]*$',word)]
+            lengths=snapped(lengths,sorted(set(starts[1:])),sorted(set(clauses)))
         cursor=0;word_cursor=0
         for index,length in enumerate(lengths):
             begin=cursor;cursor+=length

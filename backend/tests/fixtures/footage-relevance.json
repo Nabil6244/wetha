@@ -1,0 +1,29 @@
+{"note": "Labels are editorial judgements of whether a clip visually communicates the beat. 1 = good illustration, 0 = not.",
+ "beats": [
+  {"concept": "hurricane_wind", "narration": "Hurricane-force winds bent palms and drove rain sideways along the coast.", "candidates": [
+    ["Palm trees bending in hurricane force winds", 1], ["Wind-driven rain lashing a street during a hurricane", 1],
+    ["Trees thrashing in a violent storm wind", 1], ["Flying debris in strong winds", 1],
+    ["Vibrant green grass in windy field", 0], ["Gentle breeze through a wheat field at sunset", 0],
+    ["Dramatic storm clouds over mountain landscape", 0], ["Low angle palm tree swaying on a sunny day with blue sky", 0],
+    ["Cartoon hurricane animation for kids", 0], ["Windy day kite festival", 0]]},
+  {"concept": "storm_surge", "narration": "Storm surge pushed the Gulf over seawalls and into coastal streets.", "candidates": [
+    ["Storm surge waves overtopping a seawall", 1], ["Coastal flooding as sea water enters streets", 1],
+    ["Huge waves crashing over a pier during a hurricane", 1], ["Big waves crashing through the wall onto the road", 1],
+    ["Serene ocean waves on a sunny beach", 0], ["Surfer riding a wave at sunset", 0], ["Calm sea at sunrise", 0],
+    ["Dramatic storm clouds", 0], ["Ocean waves relaxing sounds 10 hours", 0], ["Beach resort vacation drone", 0]]},
+  {"concept": "rainfall", "narration": "Torrential rain fell for hours, with three to four inches reported.", "candidates": [
+    ["Heavy rain pouring on a city street at night", 1], ["Torrential downpour on car windshield", 1], ["Rain falling hard on puddles", 1],
+    ["Sunny day in the park", 0], ["Dramatic clouds timelapse", 0], ["Desert dunes at noon", 0], ["Snow falling in a forest", 0]]},
+  {"concept": "flash_flood", "narration": "Flash flooding swamped underpasses and stranded cars.", "candidates": [
+    ["Flooded street with submerged cars", 1], ["Fast-moving flood water rushing over a road", 1], ["Swollen creek flooding a neighborhood", 1],
+    ["Calm lake reflection", 0], ["People swimming in a pool", 0], ["Rain on a window", 0], ["Kayaking on a quiet river", 0]]},
+  {"concept": "evacuation", "narration": "Residents were urged to evacuate before the storm arrived.", "candidates": [
+    ["Hurricane evacuation traffic on the interstate", 1], ["Family boarding up windows with plywood before a storm", 1], ["Sandbags stacked outside a shop", 1],
+    ["Road trip through scenic mountains", 0], ["Holiday traffic at the airport", 0], ["Storm clouds", 0]]},
+  {"concept": "forecast_warning", "narration": "The National Hurricane Center issued a hurricane warning at 11 a.m.", "candidates": [
+    ["Weather radar loop of a hurricane", 1], ["Hurricane from space satellite view", 1], ["Meteorologist at a weather map", 1],
+    ["Sunny beach", 0], ["Storm clouds over mountains", 0], ["Music video storm scene", 0]]},
+  {"concept": "general_context", "narration": "Here is the latest on the storm.", "candidates": [
+    ["Stormy sea with dark clouds over the coast", 1], ["Hurricane clouds over the ocean", 1],
+    ["Clear blue sky over a meadow", 0], ["Snowy mountain peak", 0], ["Animated weather cartoon", 0], ["City skyline at night", 0]]}
+ ]}

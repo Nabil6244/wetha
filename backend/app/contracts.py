@@ -235,7 +235,7 @@ class TimelineRequest(BaseModel):
     # With imported narration: a quiet original instrumental that ducks under the voice, plus soft transition sounds.
     music_bed: bool = True
     # Footage whose filming location is unknown may illustrate a beat that names a place, always labelled
-    # "location not verified" on screen. Footage reviewed as filmed elsewhere is never used.
+    # "location not verified" on screen. Reviewed footage from a comparable state is used labelled with where it was filmed; from an unrelated place, never.
     unverified_location_footage: bool = True
     template: Literal['short_30', 'report_60', 'report_90'] | None = None
 
@@ -255,6 +255,10 @@ class MediaCatalogRequest(BaseModel):
     captured_at: date | None = None
     reference: str = Field(default='', max_length=1000)
     preferred_trim_start: float = Field(default=0, ge=0, le=3600)
+    # Reviewer cleared the visible setting for use in US stories (nothing in the footage contradicts a US location).
+    # Importing, previewing or rating a clip relevant never sets this.
+    setting_cleared: bool = False
+    setting_note: str = Field(default='', max_length=300)
 
     @model_validator(mode='after')
     def region_review(self):
@@ -268,6 +272,8 @@ class MediaCatalogRequest(BaseModel):
             parsed = urlsplit(self.reference)
             if not self.region_codes or parsed.scheme not in ('https', 'http') or not parsed.hostname:
                 raise ValueError('Reviewed locations require a capture region and a source URL documenting it.')
+        if self.setting_cleared and len(self.setting_note.strip()) < 3:
+            raise ValueError('Say briefly what you checked before clearing the setting for US stories.')
         return self
 
     @field_validator('tags')
