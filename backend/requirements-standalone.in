@@ -1,0 +1,2 @@
+-r requirements.in
+-r requirements-speech.txt

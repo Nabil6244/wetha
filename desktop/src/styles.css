@@ -70,3 +70,10 @@
 .library-table th, .library-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.06); }
 .library-table tr.gap-missing td { color: #ff9e8a; }
 .library-table tr.gap-thin td { color: #ffd089; }
+
+/* Keep maintenance controls inside their panel at every desktop window width. */
+.settings-grid>.storage-settings{grid-column:1/-1;min-width:0}
+.storage-settings .panel-header{flex-wrap:wrap;gap:12px}
+.storage-settings .detail-body{min-width:0;overflow-wrap:anywhere}
+.storage-cleanup-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;margin-top:23px}
+.storage-cleanup-actions>.button{min-width:0;width:100%;white-space:normal;overflow-wrap:anywhere;justify-content:center}

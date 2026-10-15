@@ -49,12 +49,13 @@ def write_observation(service, asset):
     return path.name
 
 
-def radar_option(service, advisory, parameters, source):
+def radar_option(service, advisory, parameters, source, story_geojson=None):
     """Reuse the radar map scene with frames near the story time whose extent covers the story region."""
     from .map_scenes import prepare
     # The story's own geography: the region its frames were collected for (a scene's map may carry more).
     own = getattr(service, 'story_geography', None)
-    region = (story_bounds({'geojson': own(advisory.id)}) if own else None) or story_bounds(parameters)
+    region = (story_bounds({'geojson': story_geojson}) if story_geojson is not None else
+              story_bounds({'geojson': own(advisory.id)}) if own else None) or story_bounds(parameters)
     if not region:
         return None
     # Frames from the hour up to the story time only: radar observed after the story is not its evidence.
@@ -91,24 +92,31 @@ def radar_option(service, advisory, parameters, source):
 def satellite_option(service, advisory, parameters, source):
     """GOES GeoColor frames near the story time when the story lies in the sector. Native viewport, labelled context."""
     region = story_bounds(parameters)
-    if not region or not intersects(region, GOES_SECTOR):
+    if not region:
         return None
-    assets = sorted([a for a in service.store.visual_assets('goes')
-                     if abs((datetime.fromisoformat(a['observed_at']) - advisory.issued_at).total_seconds()) <= SATELLITE_WINDOW],
-                    key=lambda a: a['observed_at'])[-12:]
-    if len(assets) < 2:
+    from .satellite import matching
+    candidates = matching(service.store.visual_assets('goes'), advisory.issued_at, region)
+    groups = {}
+    for asset in candidates:
+        groups.setdefault(asset['metadata'].get('sector', 'ga'), []).append(asset)
+    loops = [sorted(group, key=lambda a:a['observed_at'])[-6:] for group in groups.values() if len(group)>=2]
+    if not loops:
         return None
+    # Never alternate incompatible sectors within the same observation loop.
+    assets = min(loops, key=lambda group:(abs((datetime.fromisoformat(group[-1]['observed_at'])-advisory.issued_at).total_seconds()),
+                 (group[0]['metadata'].get('extent', GOES_SECTOR)[2]-group[0]['metadata'].get('extent', GOES_SECTOR)[0])))
+    coverage = assets[0]['metadata'].get('product','Gulf/Atlantic regional context') + '; event attribution unverified'
     pinned = []
     for asset in assets:
         pinned.append({**{k: asset[k] for k in ('id', 'source_url', 'observed_at', 'content_type', 'checksum', 'metadata')},
                        'filename': write_observation(service, asset), 'license': 'NOAA STAR image reuse with NOAA/NESDIS/STAR credit'})
     sources = [broadcast.VisualSource(**{**source.model_dump(), 'data_type': 'satellite_observation', 'source_url': a['source_url'], 'checksum': a['checksum'],
                'observation_start': datetime.fromisoformat(a['observed_at']), 'observation_end': datetime.fromisoformat(a['observed_at']),
-               'projection': 'native_viewport', 'coverage': 'Gulf/Atlantic regional context; event attribution unverified',
-               'attribution': 'NOAA / NESDIS / STAR', 'license': a['license'], 'catalogue_url': a['source_url']}) for a in pinned]
+               'projection': 'native_viewport', 'coverage': coverage,
+               'attribution': 'CIRA / NOAA / NESDIS / STAR', 'license': a['license'], 'catalogue_url': a['source_url']}) for a in pinned]
     direction = broadcast.SceneDirection(scene_type='satellite_timelapse', event_id=advisory.event_key, duration=4, headline='SATELLITE VIEW',
         layers=['satellite'], asset_ids=[a['id'] for a in pinned], sources=sources,
         camera=broadcast.Camera(movement='smooth_zoom_in', end_zoom=1.06)).model_dump(mode='json')
     return {'direction': direction, 'parameters': {'map_observations': pinned,
-            'credit': 'NOAA / NESDIS / STAR GOES-19 GeoColor · regional context · observation times shown'},
+            'credit': 'CIRA / NOAA / NESDIS / STAR GOES-19 GeoColor · regional context · observation times shown'},
             'frames': [a['observed_at'] for a in pinned]}

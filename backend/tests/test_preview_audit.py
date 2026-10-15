@@ -160,3 +160,33 @@ def test_shots_cut_where_a_clause_starts_rather_than_inside_a_phrase():
     new,derived,edits=subdivide(plan,{'id':'speech','result':align(plan,words,len(words)*.4)})
     assert all(round(e['seconds']*30)>=75 for e in edits) and ' '.join(s['script_segment'] for s in new['scenes'])==text
     assert not any(s['script_segment'].endswith('Phenix') for s in new['scenes'])
+
+
+def test_related_alert_interval_and_pronouns_are_not_spurious_measurements():
+    first=source('fl','Pecos, TX','Tornado Warning at 230 PM CDT. Radar indicated rotation.')
+    first.title='Tornado Warning';first.issued_at=datetime(2026,10,14,19,30,tzinfo=timezone.utc)
+    second=source('al','Pecos, TX','Severe Thunderstorm Warning at 232 PM CDT until 315 PM CDT.')
+    second.title='Severe Thunderstorm Warning';second.issued_at=datetime(2026,10,14,19,32,tzinfo=timezone.utc)
+    doc=document('Tornado Warning for Pecos County.', 'Two minutes later, at 2:32 PM, a Severe Thunderstorm Warning was issued for Pecos County, until 3:15 PM.', 'This one describes the warning.')
+    result=audit(doc,[first,second])
+    assert result['ready'],result
+    assert result['claims'][1]['primary_advisory_id']=='al'
+    assert not audit(document('Three minutes later, at 2:32 PM, a Severe Thunderstorm Warning was issued for Pecos County.'),[first,second])['ready']
+
+
+def test_source_dates_with_leading_zeroes_and_pronouns_match_narration():
+    a=source('fl','Canadian River Oklahoma','At 1:45 PM CDT the stage was 18.0 feet. Flood stage is 14.0 feet. Previous crest 17.6 feet on 05/09/2019.')
+    result=audit(document('This one has a river stage of 18 feet at 1:45 PM, versus the 14-foot flood stage, and a previous crest of 17.6 feet on May 9th, 2019.'),[a])
+    assert result['ready'],result
+
+
+def test_river_graphs_separate_observed_threshold_and_forecast_values():
+    a=source('fl','North Canadian River near Harrah','At 1:15 PM CDT Wednesday the stage was 6.7 feet. - Forecast...The river will rise above flood stage late this evening to 15.3 feet tomorrow morning. It will rise to 15.0 feet tomorrow evening. - Flood stage is 14.0 feet. - http://weather.gov')
+    scene={'parameters':{},'script_segment':'The river stage was 6.7 feet, below the 14-foot flood stage. Forecast to rise to 15.3 feet tomorrow morning and 15 feet tomorrow evening.'}
+    result=prepare(scene,a)
+    assert [c['field'] for c in result['charts']]==['river_stage','river_forecast']
+    assert result['charts'][0]['bars']==[{'label':'Observed stage','value':6.7,'kind':'observed'},{'label':'Flood stage','value':14,'kind':'threshold'}]
+    assert [b['value'] for b in result['charts'][1]['bars']]==[15.3,15]
+    assert all(b['kind']=='forecast' for b in result['charts'][1]['bars'])
+    assert all(p['advisory_id']=='fl' for c in result['charts'] for p in c['points'])
+    assert prepare({'parameters':{},'script_segment':'The river is expected to rise.'},a) is None

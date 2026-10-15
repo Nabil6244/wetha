@@ -1,0 +1,61 @@
+name: Build standalone desktop apps
+on:
+  push:
+    branches: [automatic-production-engine]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: Windows-x64
+            command: package:win
+          - os: macos-15
+            platform: macOS-arm64
+            command: package:mac
+          - os: macos-15-intel
+            platform: macOS-x64
+            command: package:mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: python scripts/prepare-standalone.py
+      - run: node --test scripts/runtime.test.cjs
+      - run: npm run ${{ matrix.command }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Validate packaged Windows resources without developer tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "release/win-unpacked/resources/backend-runtime/python.exe" scripts/smoke-standalone.py --resources release/win-unpacked/resources --report release/standalone-smoke-Windows-x64.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Validate packaged macOS resources without developer tools
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bundle=$(find release -path '*.app/Contents/Resources/backend-runtime/bin/python3' -print -quit)
+          resources="$(dirname "$(dirname "$(dirname "$bundle")")")"
+          "$bundle" scripts/smoke-standalone.py --resources "$resources" --report "release/standalone-smoke-${{ matrix.platform }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Weather-Intelligence-Studio-${{ matrix.platform }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/standalone-smoke-*.json
+          if-no-files-found: error
+          retention-days: 14

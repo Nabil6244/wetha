@@ -79,6 +79,10 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
   const [autoJob, setAutoJob] = useState<AutoJob | null>(null);
   const [findFootage, setFindFootage] = useState(false);
   const announced = useRef('');
+  const loadPending=useRef<Promise<void>|null>(null);
+  const restoredRef=useRef(false);
+  const startingProduction=useRef(false);
+  const [connectionNotice,setConnectionNotice]=useState('');
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
   const [requestedTemplate, setRequestedTemplate] = useState<Template>('short_30');
@@ -92,10 +96,16 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
   const [autoFinish,setAutoFinish]=useState(false);
   const [alignment,setAlignment]=useState<Alignment|null>(null);
   const [restored,setRestored] = useState(false);
-  async function load() {
+  function load(): Promise<void> {
+    if(loadPending.current)return loadPending.current;
+    const task=loadWorkspace();loadPending.current=task;
+    void task.finally(()=>{loadPending.current=null;}).catch(()=>{});
+    return task;
+  }
+  async function loadWorkspace() {
     const [production, visual] = await Promise.all([api<State>('/production'), api<{plans: Plan[]}>('/visuals')]);
     setState(production); setPlans(visual.plans);
-    if (!restored && page === 'Video Production') {
+    if (!restoredRef.current && page === 'Video Production') {
       try {
         const saved=JSON.parse(localStorage.getItem('wetha-create-video-progress-v1') || '{}');
         const selected=visual.plans.find(p=>p.id===saved.planId);
@@ -106,7 +116,7 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
           setNarrationId(saved.narrationId ?? '');setNarrationVerified(saved.narrationVerified ?? false);setDirty(saved.dirty ?? true);
         }
       } catch {/* Saved backend plans remain available if browser storage is unavailable. */}
-      setRestored(true);
+      restoredRef.current=true;setRestored(true);
     }
   }
   useEffect(()=>{
@@ -125,25 +135,25 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
       loading = true;
       void api<{renders: Pick<Render,'id'|'status'|'stage'|'progress'|'error'|'validation'|'attempts'>[]}>('/production/progress')
         .then(update=>setState(current=>current ? {...current,renders:current.renders.map(render=>({...render,...update.renders.find(r=>r.id===render.id)}))} : current))
-        .catch(e => setError(e.message)).finally(()=>{loading=false;});
+        .catch(e => setConnectionNotice(e.message)).finally(()=>{loading=false;});
     }, 2500);
     return () => clearInterval(timer);
   }, [rendering]);
   useEffect(()=>{
     if(!alignment||!['queued','running'].includes(alignment.status))return;
     let pending=false;let cancelled=false;
-    const timer=setInterval(()=>{if(pending)return;pending=true;void api<Alignment>(`/production/alignment/${alignment.id}`).then(job=>{if(cancelled)return;setAlignment(job);if(job.status==='failed')setError(job.error??'Speech alignment failed.');if(job.status==='completed'&&job.result){setNotice(`Speech timing ready: ${(job.result.coverage*100).toFixed(0)}% of script words matched. Apply it, then listen and review scene changes.`);}}).catch(e=>{if(!cancelled){setAlignment(null);setError(e.message);}}).finally(()=>{pending=false;});},2500);
+    const timer=setInterval(()=>{if(pending)return;pending=true;void api<Alignment>(`/production/alignment/${alignment.id}`).then(job=>{if(cancelled)return;setAlignment(job);if(job.status==='failed')setError(job.error??'Speech alignment failed.');if(job.status==='completed'&&job.result){setNotice(`Speech timing ready: ${(job.result.coverage*100).toFixed(0)}% of script words matched. Apply it, then listen and review scene changes.`);}}).catch(e=>{if(!cancelled)setConnectionNotice(e.message);}).finally(()=>{pending=false;});},2500);
     return()=>{cancelled=true;clearInterval(timer);};
   },[alignment?.id,alignment?.status]);
   useEffect(()=>{
     if(!footageJob||!['queued','running'].includes(footageJob.status))return;
     let pending=false;let cancelled=false;
-    const timer=setInterval(()=>{if(pending)return;pending=true;void api<FootageSearchJob>(`/production/find-footage/${footageJob.id}`).then(job=>{if(cancelled)return;setFootageJob(job);if(job.status==='failed')setError(job.error??'Footage search failed.');if(job.status==='completed'){void load().catch(e=>setError(e.message));setNotice(`${job.imported.length} new recordings added. Review location evidence below, then rebuild the mixed edit.`);}}).catch(e=>{if(!cancelled){setFootageJob(null);setError(e.message);}}).finally(()=>{pending=false;});},2500);
+    const timer=setInterval(()=>{if(pending)return;pending=true;void api<FootageSearchJob>(`/production/find-footage/${footageJob.id}`).then(job=>{if(cancelled)return;setFootageJob(job);if(job.status==='failed')setError(job.error??'Footage search failed.');if(job.status==='completed'){void load().catch(e=>setError(e.message));setNotice(`${job.imported.length} new recordings added. Review location evidence below, then rebuild the mixed edit.`);}}).catch(e=>{if(!cancelled)setConnectionNotice(e.message);}).finally(()=>{pending=false;});},2500);
     return()=>{cancelled=true;clearInterval(timer);};
   },[footageJob?.id,footageJob?.status]);
   async function work(label: string, action: () => Promise<void>) {
     setBusy(label); setError(''); setNotice('');
-    try {await action(); await load();} catch (e) {setError(e instanceof Error ? e.message : 'Production operation failed');} finally {setBusy('');}
+    try {await action(); await load().catch(e=>setConnectionNotice('The action completed. '+e.message));} catch (e) {setError(e instanceof Error ? e.message : 'Production operation failed');} finally {setBusy('');}
   }
   function choosePlan(id: string) {
     const plan = plans.find(p => p.id === id);
@@ -217,14 +227,16 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
   }
 
   async function makeFinalVideo() {
-    await work('Starting automatic production', async () => {
+    if(startingProduction.current||autoJob&&['queued','running'].includes(autoJob.status))return;
+    startingProduction.current=true;
+    try{await work('Starting automatic production', async () => {
       if(unsavedNarration)throw new Error('Save your pasted script using Save script & prepare automatically above.');
       if(!narrationId)throw new Error('Upload the voiceover for this script first.');
       // Everything after script and voiceover runs as one saved, resumable job on the backend.
       const job=await api<AutoJob>('/production/auto',{plan_id:planId,narration_id:narrationId,title:title.trim().length>=2?title:'Weather update',narration_verified:narrationVerified,find_footage:findFootage,music_bed:musicBed,scenes});
       setAutoJob(job);
       setNotice('Automatic production started. It aligns the voiceover, plans visuals and footage, renders and checks the video. You can keep working.');
-    });
+    });}finally{startingProduction.current=false;}
   }
 
   async function autoAction(action:'resume'|'cancel'){
@@ -234,20 +246,22 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
 
   useEffect(()=>{
     if(!autoJob||!['queued','running'].includes(autoJob.status))return;
-    const timer=window.setInterval(()=>{void api<AutoJob>(`/production/auto/${autoJob.id}`).then(job=>{
-      setAutoJob(job);
+    let pending=false,cancelled=false;
+    const timer=window.setInterval(()=>{if(pending)return;pending=true;void api<AutoJob>(`/production/auto/${autoJob.id}`).then(job=>{
+      if(cancelled)return;
+      setConnectionNotice('');setAutoJob(job);
       if(job.render_id&&announced.current!==job.id){
         announced.current=job.id;
         if(job.timeline_id){setTimelineId(job.timeline_id);setDirty(false);}
-        setPreviewId(job.render_id);void load();
+        setPreviewId(job.render_id);void load().catch(e=>setConnectionNotice(e.message));
         setNotice('Source checks, speech timing, graphs and available footage were prepared automatically. Your video is rendering locally. When it is ready, preview it and download the MP4 below.');
       }
-      if(job.status==='succeeded'&&job.render_id){setPreviewId(job.render_id);void load();setNotice('Your finished video is ready. Preview it and download the MP4 below; the production report lists anything to review.');}
-    }).catch(()=>{/* The next poll retries. */});},1500);
-    return ()=>window.clearInterval(timer);
+      if(job.status==='succeeded'&&job.render_id){setPreviewId(job.render_id);void load().catch(e=>setConnectionNotice(e.message));setNotice('Your finished video is ready. Preview it and download the MP4 below; the production report lists anything to review.');}
+    }).catch(e=>{if(!cancelled)setConnectionNotice(e.message);}).finally(()=>{pending=false;});},2500);
+    return ()=>{cancelled=true;window.clearInterval(timer);};
   },[autoJob?.id,autoJob?.status]);
 
-  useEffect(()=>{void api<AutoJob[]>('/production/auto').then(jobs=>{const latest=jobs.find(j=>j.status!=='succeeded');if(latest)setAutoJob(latest);}).catch(()=>{/* Older backends have no automatic jobs. */});},[]);
+  useEffect(()=>{void api<AutoJob[]>('/production/auto').then(jobs=>{const latest=jobs.find(j=>['queued','running'].includes(j.status))??jobs[0];if(latest)setAutoJob(latest);}).catch(()=>{/* Older backends have no automatic jobs. */});},[]);
 
   useEffect(()=>{
     if(!autoFinish||busy)return;
@@ -258,9 +272,10 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
   return <div className="production-workspace">
     {error && <div role="alert" className="message error">{error}<button aria-label="Dismiss production error" onClick={() => setError('')}><X size={16}/></button></div>}
     {notice && <div role="status" className="message success"><FileCheck size={16}/>{notice}</div>}
+    {connectionNotice&&<div role="status" className="message"><span>{connectionNotice} Status checks will retry automatically.</span><button className="button secondary" onClick={()=>void load().then(()=>setConnectionNotice('')).catch(e=>setConnectionNotice(e.message))}>Reconnect</button></div>}
     {busy && <div role="status" className="working"><LoaderCircle size={15} className="spin"/>{busy}…</div>}
     <div className="production-banner"><Clapperboard size={21}/><div><strong>Make your weather video</strong><p>Choose stories, build flowing narration, upload your voiceover, then export—all here.</p></div><span className="pill">Local production</span></div>
-    {!state ? <section className="panel detail-body">Loading production workspace…</section> : <>
+    {!state ? <section className="panel detail-body">Loading production workspace… {error&&<button className="button secondary" onClick={()=>void load().then(()=>setError('')).catch(e=>setError(e.message))}>Retry loading workspace</button>}</section> : <>
     {page === 'Video Production' && <>
       <nav className="production-steps" aria-label="Video creation steps">{['Stories & narration', 'Add voiceover', 'Review visuals', 'Download video'].map((label, i) => <a key={label} href={['#bulletin-stories', '#production-voiceover', '#production-finish', '#production-results'][i]}><span>{i+1}</span>{label}</a>)}</nav>
       <BulletinBuilder data={data} disabled={!!busy || !!rendering} onBusyChange={setBusy} onDraftChange={setUnsavedNarration} onRefresh={onRefresh} onReady={(script,result)=>{
@@ -311,7 +326,7 @@ export default function Production({page, data, onRefresh}: {page: 'Media Librar
       {!!footageNeeds.length&&<div aria-label="Footage needed for this bulletin"><h3>Footage to add</h3><p>These beats need more location-matched recordings. Search, review and import clips, then rebuild the mixed edit.</p>{footageNeeds.map(g=><div className="production-actions" key={g.query}><span>{g.query} · {g.scene_ids.length} beats · {g.seconds.toFixed(0)} seconds</span><button className="button secondary" onClick={()=>setFootageSearch({query:g.query,planId})}>Find footage: {g.query}</button></div>)}</div>}
       <details><summary>Review available footage ({state.media.filter(m=>m.kind==='video').length} recordings)</summary><p className="muted">Preview new recordings, check their source and save capture-location evidence here. The mixed edit can use reviewed clips that match each scene.</p>{state.media.filter(m=>m.kind==='video').map(media=><details key={media.id}><summary>{media.name} · {((media.seconds??0)/60).toFixed(1)} minutes</summary><video controls preload="none" style={{width:'100%',maxHeight:320}} src={`/api/production/media/${media.id}/file`}/><p>{media.context} · {media.license}</p><a href={media.source} target="_blank" rel="noreferrer">Review original source</a><MediaCatalogEditor regions={state.regions} id={media.id} name={media.name} kind={media.kind} catalog={media.catalog} busy={!!busy} save={(id,catalog)=>{void work('Saving footage location evidence',async()=>{const response=await fetch(`/api/production/media/${id}/catalog`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(catalog)});if(!response.ok){const result=await response.json();throw new Error(typeof result.detail==='string'?result.detail:'Unable to save location evidence');}});}}/></details>)}</details>
       <details open={!!footageSearch}><summary>Find &amp; add footage in this tab</summary><MediaDiscovery requestedSearch={footageSearch} regions={state.regions} plans={plans} scriptNames={Object.fromEntries(data.scripts.map(s=>[s.id,s.title]))} imported={load}/></details>
-      <div className="production-actions"><button className="button secondary" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}>{advanced ? 'Hide editing controls' : 'Edit visuals & timing'}</button><button className="button primary" disabled={!!busy || rendering || !scenes.length || plan.superseded_script_revision || !state.runtime.ffmpeg || !state.runtime.ffprobe} onClick={() => {void makeFinalVideo();}}>{rendering ? <LoaderCircle size={16} className="spin"/> : <Play size={16}/>} {rendering ? 'Rendering video…' : 'Make final video'}</button></div>
+      <div className="production-actions"><button className="button secondary" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}>{advanced ? 'Hide editing controls' : 'Edit visuals & timing'}</button><button className="button primary" disabled={!!busy || rendering || !!autoJob&&['queued','running'].includes(autoJob.status) || !scenes.length || plan.superseded_script_revision || !state.runtime.ffmpeg || !state.runtime.ffprobe} onClick={() => {void makeFinalVideo();}}>{rendering ? <LoaderCircle size={16} className="spin"/> : <Play size={16}/>} {rendering ? 'Rendering video…' : 'Make final video'}</button></div>
       <label className="production-check"><input type="checkbox" checked={findFootage} onChange={e=>setFindFootage(e.target.checked)}/>Search for new licensed footage where the library has gaps (Wikimedia, NASA, and Pexels/Pixabay when their keys are set)</label>
       {autoJob && <AutoProduction job={autoJob} busy={!!busy} onResume={()=>{void autoAction('resume');}} onCancel={()=>{void autoAction('cancel');}}/>}
       {activeRender&&<div className="production-export-status" role="status" aria-label="Export progress"><strong>{activeRender.snapshot.title} · {activeRender.status==='queued'?'Export queued':'Export in progress'}</strong><p>{activeRender.stage} · {activeRender.progress}%</p><progress max={100} value={activeRender.progress}/><p>This runs locally. The export button stays disabled until rendering finishes.</p><a className="button secondary" href="#production-results">View render progress</a></div>}

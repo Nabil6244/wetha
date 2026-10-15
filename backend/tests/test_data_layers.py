@@ -236,17 +236,18 @@ def test_old_stories_use_archived_radar_when_nowcoast_has_moved_on(monkeypatch):
         raise ValueError('Radar for 10 Oct 00:30 UTC is not served any more.')
     async def archive(service, moment, region, frames=6):
         assert moment == advisory.issued_at;return ['f1', 'f2', 'f3']
-    async def no_goes(identity):
+    async def no_goes(service, moment, region):
         raise ValueError('offline')
     monkeypatch.setattr(radar_archive, 'collect', archive)
+    monkeypatch.setattr('app.satellite.collect', no_goes)
     geojson = {'features': [{'type': 'Feature', 'properties': {}, 'geometry': {'type': 'Point', 'coordinates': [-82.5, 27.3]}}]}
     job = {'issues': [], 'stages': [{'key': 'data', 'label': 'Data', 'status': 'queued'}]}
-    fake = SimpleNamespace(visuals=SimpleNamespace(collect_radar_at=gone, collect=no_goes, geography=lambda identity: {'geojson': geojson}),
+    fake = SimpleNamespace(visuals=SimpleNamespace(collect_radar_at=gone, collect=no_goes, geography=lambda identity, intelligence: {'geojson': geojson}),
                            store=SimpleNamespace(visual_plan=lambda _: {'advisory_id': 'a', 'scenes': [{'script_segment': 'Rain bands moved ashore.', 'parameters': {}}]},
-                                                 advisory=lambda _: advisory),
-                           stage=lambda job, key, status, detail='': job.update(detail=detail))
+                                                 advisory=lambda _: advisory, advisories=lambda:[], feeds=lambda:[], memberships=lambda:{}),
+                           stage=lambda job, key, status, detail='', fraction=0: job.update(detail=detail))
     asyncio.run(orchestrator.Orchestrator.collect_data(fake, job, 'plan'))
-    assert '3 archived radar frames at 10 Oct 2024 00:30 UTC' in job['data']['collected']
+    assert any('3 radar frames at 10 Oct 00:30 UTC' in item for item in job['data']['collected'])
     assert not any(m.startswith('Radar') for m in job['data']['unavailable'])
 
 

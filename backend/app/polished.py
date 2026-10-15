@@ -34,7 +34,8 @@ def suggest(text, evidence):
 
 
 def save(document, body, evidence):
-    result=edited(document,body.text,evidence)
+    # Unchanged text may still be saved once, to mark a generated bulletin as the final narration.
+    result=edited(document,body.text,evidence,allow_same=not document.get('polished_narration'))
     identities=body.sources
     if not identities:
         from .preview_audit import audit

@@ -5,12 +5,15 @@ mixed edit (prepare), optional footage search for reported gaps, timeline creati
 renderer, quality control and packaging. Every stage is persisted; a restart marks the job
 interrupted and Resume re-runs it, reusing the completed alignment and rendered scenes.
 """
+import logging
 import asyncio
 import copy
 import httpx
+from .storage import RevisionConflict
 from uuid import uuid4
 from .contracts import FootageExpansionRequest, TimelineRequest
 from .storage import now
+from .alignment import AlignmentBusy
 
 STAGES = [('validate', 'Check script and voiceover'), ('align', 'Match the voiceover to the script'),
           ('plan', 'Plan shots, visuals and footage'), ('data', 'Collect maps and observations'), ('footage', 'Find footage for gaps'),
@@ -35,6 +38,12 @@ class Orchestrator:
         return self.describe(self.store.production_get('jobs', identity))
 
     def start(self, body):
+        if getattr(self.production, 'maintenance', False):
+            raise ValueError('Storage cleanup is finishing. Try again in a moment.')
+        request = body.model_dump()
+        for existing in self.store.production_list('jobs'):
+            if existing['status'] in ('queued', 'running') and existing['request'] == request:
+                return self.describe(existing)
         if len([t for t in self.tasks.values() if not t.done()]) >= 2:
             raise ValueError('Two productions are already running. Wait for one to finish.')
         plan = self.store.visual_plan(body.plan_id)
@@ -47,6 +56,8 @@ class Orchestrator:
         return self.describe(job)
 
     def resume(self, identity):
+        if getattr(self.production, 'maintenance', False):
+            raise ValueError('Storage cleanup is finishing. Try again in a moment.')
         job = self.store.production_get('jobs', identity)
         if job['status'] not in ('failed', 'interrupted', 'cancelled') or (identity in self.tasks and not self.tasks[identity].done()):
             raise ValueError('Only failed, cancelled or interrupted productions can be resumed.')
@@ -81,13 +92,15 @@ class Orchestrator:
         job['updated_at'] = now()
         self.store.production_update_job(job)
 
-    def stage(self, job, key, status, detail=''):
+    def stage(self, job, key, status, detail='', fraction=0):
         row = next(s for s in job['stages'] if s['key'] == key)
+        if row['status'] == status and row['detail'] == detail:
+            return
         row.update(status=status, detail=detail)
         if status == 'running':
             job['stage'] = row['label']
         done = sum(s['status'] in ('done', 'skipped') for s in job['stages'])
-        job['progress'] = round(done / len(job['stages']) * 100)
+        job['progress'] = min(99, round((done + min(.99, max(0, fraction))) / len(job['stages']) * 100))
         self.save(job)
 
     def base_body(self, job, plan):
@@ -99,8 +112,20 @@ class Orchestrator:
 
     async def prepared(self, job, body):
         """Run prepare; when it starts speech alignment, wait for it and prepare again."""
+        if any(i['code'] == 'timing_fallback' for i in job['issues']):
+            return await asyncio.to_thread(self.prepare, TimelineRequest(**body), False)
         while True:
-            result = await asyncio.to_thread(self.prepare, TimelineRequest(**body))
+            try:
+                result = await asyncio.to_thread(self.prepare, TimelineRequest(**body))
+            except AlignmentBusy as busy:
+                if job['request'].get('scenes') and job['request'].get('narration_verified'):
+                    job['issues'].append({'code': 'timing_fallback', 'message': 'Another recording is being aligned. Using your confirmed fitted scene timing; word-level alignment was not applied.'})
+                    self.stage(job, 'align', 'done', 'Confirmed fitted timing used; speech engine busy')
+                    return await asyncio.to_thread(self.prepare, TimelineRequest(**body), False)
+                self.stage(job, 'align', 'running', 'Waiting for the other recording to finish alignment')
+                while self.alignment.get(busy.job_id)['status'] in ('queued', 'running'):
+                    await asyncio.sleep(POLL)
+                continue
             if result['status'] != 'aligning':
                 return result
             alignment = result['alignment'];job['alignment_id'] = alignment['id']
@@ -108,7 +133,7 @@ class Orchestrator:
             while alignment['status'] in ('queued', 'running'):
                 await asyncio.sleep(POLL)
                 alignment = self.alignment.get(alignment['id'])
-                self.stage(job, 'align', 'running', f"{alignment['stage']} · {round(alignment.get('progress', 0) * 100)}%")
+                self.stage(job, 'align', 'running', f"{alignment['stage']} · {round(alignment.get('progress', 0) * 100)}%", alignment.get('progress', 0))
             if alignment['status'] != 'completed':
                 reason = alignment.get('error') or 'Speech alignment failed.'
                 if not job['request'].get('scenes'):
@@ -121,57 +146,79 @@ class Orchestrator:
     async def collect_data(self, job, plan_id):
         if self.visuals is None:
             self.stage(job, 'data', 'skipped', 'No data collector configured');return
-        from . import geography, spc
+        from . import geography, satellite, radar_archive, spc
         from .observations import story_bounds
         from .visual_director import classify, story_text
-        self.stage(job, 'data', 'running')
+        from .intelligence import IntelligenceDesk
+        self.stage(job, 'data', 'running', 'Checking cached observations before downloading')
         plan = self.store.visual_plan(plan_id);found = [];problems = []
         stories = list(dict.fromkeys(s['parameters'].get('source_advisory_id') or plan['advisory_id'] for s in plan['scenes']))
         stories = [i for i in stories if self.store.advisory(i).provider != 'TRAINING']
         if not stories:
-            # Synthetic training stories never receive real observations.
             self.stage(job, 'data', 'skipped', 'Training stories use no live observations');return
-        severe = False
-        for identity in stories:
-            advisory = self.store.advisory(identity)
-            severe = severe or any(classify(s['script_segment'], story_text(advisory))['hazard'] in ('tornado', 'severe_storm') for s in plan['scenes'] if s['parameters'].get('source_advisory_id') == identity)
-            if advisory.provider == 'NWS':
-                problems += await geography.fetch_counties(self.store, self.visuals.client, advisory)
-                found.append(f"{len(geography.county_shapes(self.store, advisory))} county outlines for {advisory.title.split(' issued')[0]}")
-            region = story_bounds({'geojson': self.visuals.geography(identity)['geojson']})
-            if region:
-                try:
-                    found.append(f"{len(await self.visuals.collect_radar_at(advisory.issued_at, region))} radar frames at {advisory.issued_at:%H:%M UTC}")
-                except (ValueError, KeyError, httpx.HTTPError) as error:
-                    # nowCOAST keeps only a few hours; older stories use the archived NEXRAD composites.
-                    from . import radar_archive
+        intelligence = IntelligenceDesk(self.store.advisories(), self.store.feeds(), self.store.memberships())
+        limit = asyncio.Semaphore(2)
+        completed = 0
+        async def story(identity):
+            nonlocal completed
+            async with limit:
+                advisory = self.store.advisory(identity)
+                name = advisory.title.split(' issued')[0]
+                async def optional(label, operation, seconds):
                     try:
-                        found.append(f"{len(await radar_archive.collect(self.visuals, advisory.issued_at, region))} archived radar frames at {advisory.issued_at:%d %b %Y %H:%M UTC}")
-                    except (ValueError, KeyError, OSError, httpx.HTTPError) as archive_error:
-                        # Radar is optional evidence: a network or image failure leaves this story without it, not the video.
-                        problems.append(f'Radar: {error or error.__class__.__name__} Archive: {archive_error or archive_error.__class__.__name__}')
+                        return await asyncio.wait_for(operation(), seconds)
+                    except (ValueError, KeyError, OSError, httpx.HTTPError, TimeoutError) as error:
+                        problems.append(f'{name} · {label}: {str(error) or "source timed out; cached observations retained"}')
+                        return None
+                if advisory.provider == 'NWS':
+                    result = await optional('county outlines', lambda:geography.fetch_counties(self.store, self.visuals.client, advisory), 10)
+                    problems.extend(result or [])
+                geo = self.visuals.geography(identity, intelligence)['geojson']
+                region = story_bounds({'geojson':geo})
+                if not region and advisory.provider == 'NWS':
+                    region = story_bounds({'geojson':{'features':[{'geometry':shape['geometry']} for shape in geography.county_shapes(self.store, advisory)]}})
+                if region:
+                    # For past stories go straight to the archive; live nowCOAST cannot supply yesterday's radar.
+                    from datetime import datetime, timezone, timedelta
+                    historical = advisory.issued_at < datetime.now(timezone.utc)-timedelta(hours=3)
+                    radar = await optional('radar',
+                        (lambda:radar_archive.collect(self.visuals, advisory.issued_at, region)) if historical else
+                        (lambda:self.visuals.collect_radar_at(advisory.issued_at, region)), 30)
+                    if radar:
+                        found.append(f'{name}: {len(radar)} radar frames at {advisory.issued_at:%d %b %H:%M UTC}')
+                    frames = await optional('satellite', lambda:satellite.collect(self.visuals, advisory.issued_at, region), 25)
+                    if frames:
+                        found.append(f'{name}: {len(frames)} time-matched GeoColor frames')
+                else:
+                    problems.append(f'{name}: no source geography for observation collection')
+                completed += 1
+                self.stage(job, 'data', 'running', f'Checked observations for {completed} of {len(stories)} stories', completed/len(stories))
+        # Optional providers cannot hold the whole production indefinitely. Partial downloads remain reusable.
         try:
-            await self.visuals.collect('goes')
-        except ValueError as error:
-            problems.append('Satellite: ' + str(error))
+            await asyncio.wait_for(asyncio.gather(*(story(identity) for identity in stories)), 90)
+        except TimeoutError:
+            problems.append('Observation collection reached its 90-second budget; using available cached frames and named maps.')
+        severe = any(classify(s['script_segment'], story_text(self.store.advisory(s['parameters'].get('source_advisory_id') or plan['advisory_id'])))['hazard'] in ('tornado','severe_storm') for s in plan['scenes'])
         if severe:
-            try:
-                await spc.collect(self.store, self.visuals.client, 1)
-            except ValueError as error:
-                problems.append(str(error))
-            for product in spc.PROBABILITY:
+            for product in ('cat', *spc.PROBABILITY):
                 try:
-                    await spc.collect(self.store, self.visuals.client, 1, product=product)
-                    found.append(f'SPC {spc.PROBABILITY[product].lower()} probability outlook')
-                except ValueError as error:
-                    # "No risk area" is a real low-risk forecast, not a failure.
-                    if 'no risk area' in str(error):
-                        found.append(str(error).rstrip('.'))
-                    else:
-                        problems.append(str(error))
-        job['issues'] += [{'code': 'data_unavailable', 'message': m} for m in problems]
-        job['data'] = {'collected': found, 'unavailable': problems}
-        self.stage(job, 'data', 'done', ' · '.join(found)[:180] or 'No story data available')
+                    await asyncio.wait_for(spc.collect(self.store, self.visuals.client, 1, product=product), 6)
+                    found.append('SPC '+product+' outlook collected; applied only when valid at the story time')
+                except (ValueError, OSError, httpx.HTTPError, TimeoutError) as error:
+                    problems.append('SPC '+product+': '+(str(error) or 'source timed out'))
+        job['issues'] += [{'code':'data_unavailable','message':m} for m in problems]
+        job['data'] = {'collected':found,'unavailable':problems}
+        self.stage(job, 'data', 'done', f'{len(found)} source layers collected · {len(problems)} availability notes')
+
+    def current_plan(self, job, plan):
+        """A script edited after its plan was made gets a fresh plan from the latest revision instead of failing the job."""
+        script = self.production.describe_script(self.store.script(plan['script_id']))
+        if script['revision'] == plan['script_revision'] or not script.get('is_latest', True) or not self.visuals:
+            return plan
+        fresh = self.visuals.plan(script, plan.get('style', 'map'))
+        job['plan_id'] = job['request']['plan_id'] = fresh['id']
+        self.save(job)
+        return fresh
 
     async def run(self, job):
         try:
@@ -179,7 +226,7 @@ class Orchestrator:
             request = job['request']
             # 1. Validate.
             self.stage(job, 'validate', 'running')
-            plan = self.store.visual_plan(job['plan_id'])
+            plan = self.current_plan(job, self.store.visual_plan(job['plan_id']))
             self.production.validate_plan(plan)
             narration = self.store.production_get('media', request['narration_id'])
             if narration['kind'] != 'audio':
@@ -216,6 +263,8 @@ class Orchestrator:
                 self.stage(job, 'footage', 'done', f"{len(search.get('imported', []))} clips added")
             else:
                 self.stage(job, 'footage', 'skipped', 'Footage search off' if not request['find_footage'] else 'No gaps')
+                if self.visuals is not None and job.get('data', {}).get('collected'):
+                    result = await self.prepared(job, {**result['body']})
             check = result['check']
             job['issues'] += [{'code': i['code'], 'message': i['message']} for i in check['issues']]
             if not check['ready']:
@@ -233,12 +282,12 @@ class Orchestrator:
             self.stage(job, 'storyboard', 'done', f"{m['distinct_visuals']} distinct visuals · {m['distinct_clips']} clips · places shown {m['place_beats_shown']}/{m['beats_naming_places']}")
             # 6. Render with the existing parallel, resumable renderer.
             self.stage(job, 'render', 'running')
-            render = self.production.start(timeline['id'])
+            render = await self.production.start_async(timeline['id'])
             job['render_id'] = render['id']
             while True:
                 await asyncio.sleep(POLL)
                 render = self.store.production_get('renders', job['render_id'])
-                self.stage(job, 'render', 'running', f"{render['stage']} · {render.get('progress', 0)}%")
+                self.stage(job, 'render', 'running', f"{render['stage']} · {render.get('progress', 0)}%", render.get('progress', 0) / 100)
                 if render['status'] in ('succeeded', 'failed', 'cancelled'):
                     break
             if render['status'] != 'succeeded':
@@ -255,6 +304,7 @@ class Orchestrator:
             self.save(job)
             raise
         except Exception as error:
+            logging.getLogger(__name__).exception('Automatic production failed')
             for stage in job['stages']:
                 if stage['status'] == 'running':
                     stage['status'] = 'failed'
@@ -263,6 +313,6 @@ class Orchestrator:
                 fields = sorted({'.'.join(str(part) for part in e['loc'][:1]) for e in error.errors()})
                 message = f"The prepared edit failed {len(error.errors())} internal checks ({', '.join(fields)}). This is an application bug, not a problem with your script or audio; please report it."
             else:
-                message = str(error) if isinstance(error, (ValueError, KeyError)) else 'Unexpected production failure; inspect backend.log.'
+                message = str(error) if isinstance(error, (ValueError, KeyError, RevisionConflict)) else 'Unexpected production failure; inspect backend.log.'
             job.update(status='failed', stage='Needs attention', error=message)
             self.save(job)

@@ -9,7 +9,7 @@ const preview = (value: unknown) => value === null ? 'Not supplied' : String(val
 
 interface Props {
   advisories: Advisory[]; intelligence: Intelligence; advisory: Advisory | undefined; busy: boolean;
-  onSelect: (id: string) => void; onTraining: () => void; onDraft: (item: Advisory) => void;
+  onSelect: (id: string) => void; onTraining: () => void; onDraft: (item: Advisory) => void; onUseInVideo: (item: Advisory) => void;
   onPolling: (feed: Feed, enabled: boolean, interval: number) => void;
   onRefresh: (feed: Feed) => void;
 }
@@ -27,7 +27,18 @@ export function SourceControls({feeds, busy, onPolling, onRefresh}: Pick<Props, 
 }
 
 export default function WeatherDesk(props: Props) {
-  const {advisories, intelligence, advisory, busy, onSelect, onTraining, onDraft} = props;
+  const {advisories, intelligence, advisory:selectedAdvisory, busy, onSelect, onTraining, onDraft, onUseInVideo} = props;
+  const [detail,setDetail]=useState<Advisory|null>(null);
+  const [detailError,setDetailError]=useState('');
+  const [retry,setRetry]=useState(0);
+  const advisory=detail&&selectedAdvisory&&detail.id===selectedAdvisory.id?{...detail,freshness:selectedAdvisory.freshness}:selectedAdvisory;
+  useEffect(()=>{
+    let active=true;setDetail(null);setDetailError('');
+    if(selectedAdvisory?.detail_available===false){
+      void api<{advisory:Advisory}>(`/advisories/${encodeURIComponent(selectedAdvisory.id)}/evidence`).then(result=>{if(active)setDetail(result.advisory);}).catch(e=>{if(active)setDetailError(e.message);});
+    }
+    return()=>{active=false;};
+  },[selectedAdvisory?.id,selectedAdvisory?.freshness,retry]);
   const [search, setSearch] = useState('');
   const [provider, setProvider] = useState('all');
   const [scope, setScope] = useState('latest');
@@ -57,7 +68,7 @@ export default function WeatherDesk(props: Props) {
       </section>
       <section className="panel advisory-detail">{advisory ? <>
         <div className="panel-header"><h2>Source package</h2><span className={'pill ' + (advisory.freshness === 'current' ? 'green' : 'amber')}>{nice(advisory.freshness)}</span></div>
-        <div className="detail-body"><span className="eyebrow teal">{advisory.provider} / {nice(advisory.provenance)}</span><h2>{advisory.title}</h2><p className="muted">Issued {date(advisory.issued_at)}</p>{advisory.expires_at && <p className="muted">Valid until {date(advisory.expires_at)}</p>}{advisory.area && <p className="affected-area">{advisory.area}</p>}
+        <div className="detail-body">{advisory.detail_available===false&&!detailError&&<p role="status">Loading complete source evidence…</p>}{detailError&&<p role="alert">{detailError} <button className="button secondary" onClick={()=>setRetry(n=>n+1)}>Retry evidence</button></p>}<span className="eyebrow teal">{advisory.provider} / {nice(advisory.provenance)}</span><h2>{advisory.title}</h2><p className="muted">Issued {date(advisory.issued_at)}</p>{advisory.expires_at && <p className="muted">Valid until {date(advisory.expires_at)}</p>}{advisory.area && <p className="affected-area">{advisory.area}</p>}
           {advisory.source_url.startsWith('https://') ? <a href={advisory.source_url} target="_blank" rel="noreferrer">Official source<ExternalLink size={12}/></a> : <p className="muted">Synthetic fixture · no official source</p>}
           <div className="priority-explained"><strong>Editorial priority <span>{advisory.priority.score}/100</span></strong><p>{advisory.priority.reasons.join(' · ')}</p></div>
           <div className="verification-checks"><h3><ShieldCheck size={15}/>Evidence verification</h3>{advisory.verification.checks.map(check => <div key={check.check}>{check.passed ? <CheckCheck size={14} className="teal"/> : <Clock3 size={14} className="amber"/>}<span>{check.check}</span><small>{check.passed ? 'Passed' : 'Restricted'}</small></div>)}<p>{advisory.verification.confidence_note}</p></div>
@@ -66,7 +77,8 @@ export default function WeatherDesk(props: Props) {
           {!!advisory.warnings.length && <details><summary>Official watches & warnings</summary><ul className="warning-list">{advisory.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></details>}
           {advisory.forecast_excerpt && <details><summary>Official forecast guidance · source wording</summary><pre>{advisory.forecast_excerpt}</pre></details>}
           <details><summary>Complete original advisory text</summary><pre>{advisory.text}</pre></details>
-          <button className="button primary full" disabled={busy} onClick={() => onDraft(advisory)}><Sparkles size={16}/>Create source-linked script</button>
+          <button className="button primary full" disabled={busy || advisory.freshness !== 'current'} onClick={() => onUseInVideo(advisory)}><Sparkles size={16}/>Use in video</button>
+          <button className="button secondary full" disabled={busy} onClick={() => onDraft(advisory)}><Sparkles size={16}/>Create source-linked script</button>
           <div className="evidence-timeline"><h3><Clock3 size={15}/>Visual evidence timeline</h3>{timelineError && <p className="feed-error">{timelineError}</p>}{timeline.map(item => <button key={item.id} className={advisory.id === item.id ? 'timeline-active' : ''} onClick={() => onSelect(item.id)}><span className="timeline-dot"/><span><strong>{date(item.issued_at)}</strong><small>{item.title} · {nice(item.freshness)}</small></span><ArrowRight size={13}/></button>)}</div>
         </div>
       </> : <div className="empty"><FileText size={30}/><h3>Select an advisory</h3><p>Source verification, meaningful changes, and the evidence timeline appear here.</p></div>}</section>

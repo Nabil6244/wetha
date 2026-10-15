@@ -244,3 +244,19 @@ review in the same tab. See [the full workflow](docs/THIRTY_MINUTE_BULLETIN.md).
 ## Automatic final video flow
 
 Paste refined narration in Create Video, click **Save script & prepare automatically**, upload its matching voiceover, then click **Make final video**. Source matching, numerical checks, spoken timing, short shots, source charts and available footage are prepared locally. See [automatic video flow and limitations](docs/AUTOMATIC_VIDEO_FLOW.md).
+
+## Standalone installers
+
+Windows now targets a single portable EXE; macOS targets a self-contained DMG. Recipient computers need no separate Python, Node.js, FFmpeg or speech-model installation. Build instructions and the exact tested/unverified platform status are in [Packaging](docs/PACKAGING.md).
+
+### Storage, speed and recovery
+
+Open **Settings → Storage & performance** for disk usage, active hardware encoder,
+cache cleanup and database compaction. Cleanup preserves saved scripts, source
+records, uploaded audio/footage and completed videos/reports. It waits while work
+is active. Scene caches older than 30 days are removed at startup; clearing a cache
+makes future retries regenerate those scenes. Default rendering uses two workers
+and probes compatible hardware encoding before falling back to CPU encoding.
+New automatic productions collect time-matched radar and CONUS/Gulf satellite
+imagery with bounded source waits and visible availability notes.
+See [audit and measured results](docs/PERFORMANCE_AUDIT.md).

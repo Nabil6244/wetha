@@ -16,13 +16,16 @@ def canonical(text):
     text = re.sub(r'\bnautical miles?\b', 'nm', text)
     text = re.sub(r'\bfeet\b','ft',text)
     text = re.sub(r'\binches\b','in',text)
+    # "one of the areas", "no one" and "one another" are idioms, not the measurement 1.
+    text = re.sub(r'\bone(?= of\b| another\b)|(?<=\bno )one\b|(?<=\bthis )one\b|(?<=\bthat )one\b','someone',text)
     text = re.sub(r'\b('+'|'.join(WORDS)+r')\b',lambda m:str(WORDS[m[0]]),text)
     text = re.sub(r'\b([2-9]0)[ -]([1-9])\b',lambda m:str(int(m[1])+int(m[2])),text)
     text = re.sub(r'\b(\d+)[ -]and[ -]a[ -]half\b', r'\1.5', text)  # "four-and-a-half-mile" is the source's "4.5 mile".
     return re.sub(r'\s+',' ',text)
 
 def numeric_tokens(text):
-    return set(re.findall(r'(?<!\w)\d+(?:\.\d+)?',canonical(text)))
+    return {value.lstrip('0') or '0' if '.' not in value else value
+            for value in re.findall(r'(?<!\w)\d+(?:\.\d+)?',canonical(text))}
 
 MONTH_DAYS = re.compile(r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:\s*(?:,|and|to|through|-)\s*(\d{1,2})(?!\d))?(?:\s*,?\s*(\d{4}))?')
 
@@ -84,6 +87,7 @@ def audit(document, evidence):
         for a in sources:
             area=chapter_words[a.id]; content=terms(a.text+' '+a.title+' '+a.area)
             score=len(wanted&content)/max(1,len(wanted))
+            if a.title and a.title.casefold() in text.casefold():score+=2
             # Named affected places establish a chapter; continue it through short connective beats.
             anchors=wanted&(area-{'coastal','waters','county','counties','sound','beach','out','portions','parts','north','south','east','west','florida','georgia','alabama','mississippi'})
             if anchors:score+=min(2,len(anchors)*.8)
@@ -120,6 +124,12 @@ def audit(document, evidence):
         # A written date is supported when it is one of this script's own alerts' issue or expiry dates.
         dates=calendar_values(text)&source_dates(sources)
         unsupported=[n for n in unsupported if n not in dates]
+        # A stated interval between related alerts is derived from their actual issue times.
+        for delay in re.findall(r'\b(\d+) minutes? later\b',canonical(text)):
+            if any((a.issued_at-b.issued_at).total_seconds()==int(delay)*60
+                   and (terms(a.area)&terms(b.area))-generic
+                   for a in matching for b in selected_sources if a.id!=b.id):
+                unsupported=[n for n in unsupported if n!=delay]
         # A date contextualising the package is not a weather measurement.
         if re.search(r'\b(expired|dated|not current)\b',text.lower()):
             unsupported=[n for n in unsupported if n not in numeric_tokens(' '.join(a.issued_at.isoformat() for a in sources))]
@@ -134,7 +144,13 @@ def audit(document, evidence):
                 conflicts.append(f'{low}–{high} {unit}')
         for value,unit in re.findall(r'(\d+(?:\.\d+)?)\s*(mph|knots|ft|in|mb|nm)\b',canonical(text)):
             if unit=='in' and value not in inches:continue
-            if not any(re.search(r'\b'+re.escape(value)+r'\s*'+unit+r'\b',canonical(a.text)) for a in matching):
+            v=re.escape(value)
+            # "up to twelve feet" is supported by "8 to 12 feet": a range's ends are stated values too.
+            stated=lambda a:re.search(r'\b'+v+r'\s*'+unit+r'\b|\b'+v+r'\s*(?:to|-)\s*\d+(?:\.\d+)?\s*'+unit+r'\b|\b\d+(?:\.\d+)?\s*(?:to|-)\s*'+v+r'\s*'+unit+r'\b',canonical(a.text))
+            if not any(stated(a) for a in matching):
+                # A summary paragraph can span several of the script's own stories; any selected story that
+                # shares its wording and states the value supports it.
+                if any(stated(a) and len(wanted&terms(a.text+' '+a.title+' '+a.area))>=3 for a in selected_sources):continue
                 conflicts.append(f'{value} {unit}')
         if re.search(r'\b(guaranteed|certain to|definitely will)\b',text.lower()):conflicts.append('Forecast certainty is not supported by source wording')
         blocked=bool(unsupported or conflicts or not sources)

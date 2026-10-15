@@ -22,6 +22,7 @@ from .contracts import MAX_VISUAL_SCENES
 
 GOES_PAGE='https://www.star.nesdis.noaa.gov/GOES/sector_band.php?sat=G19&sector=ga&band=GEOCOLOR&length=12'
 GOES_BASE='https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/ga/GEOCOLOR/'
+GOES_CONUS='https://cdn.star.nesdis.noaa.gov/GOES19/ABI/CONUS/GEOCOLOR/'
 RADAR_BASE='https://nowcoast.noaa.gov/geoserver/observations/weather_radar/ows'
 RADAR_EXTENT=[-126,23,-65,51]
 
@@ -30,7 +31,9 @@ def source_url(url):
     p=urlsplit(url)
     if p.scheme!='https' or p.port is not None or p.username or p.password or p.fragment:
         raise ValueError('Visual sources require canonical official HTTPS URLs.')
-    if url==GOES_PAGE:
+    if url in (GOES_PAGE, GOES_BASE, GOES_CONUS):
+        return url
+    if p.hostname=='cdn.star.nesdis.noaa.gov' and re.fullmatch(r'/GOES19/ABI/CONUS/GEOCOLOR/\d{11}_GOES19-ABI-CONUS-GEOCOLOR-2500x1500.jpg',p.path) and not p.query:
         return url
     if p.hostname=='cdn.star.nesdis.noaa.gov' and re.fullmatch(r'/GOES19/ABI/SECTOR/ga/GEOCOLOR/\d{11}_GOES19-ABI-ga-GEOCOLOR-1000x1000.jpg',p.path) and not p.query:
         return url
@@ -353,8 +356,8 @@ class VisualEvidence:
             asset['temporal_label']='forecast' if asset['kind']=='forecast_cone' else 'source legend' if asset['kind']=='radar_legend' else 'recent observation' if age<=900 else 'archival observation'
         return {'assets':assets,'sources':self.store.visual_sources(),'plans':self.store.visual_plans(),'basemap':json.loads((Path(__file__).parent/'data/provenance.json').read_text())}
 
-    def geography(self,advisory_id):
-        desk=IntelligenceDesk(self.store.advisories(),self.store.feeds(),self.store.memberships())
+    def geography(self,advisory_id,intelligence=None):
+        desk=intelligence or IntelligenceDesk(self.store.advisories(),self.store.feeds(),self.store.memberships())
         item=desk.by_id[advisory_id]
         features=[];timeline=[];omitted=[]
         for source in desk.related(item):
@@ -391,6 +394,7 @@ class VisualEvidence:
 
     def plan(self,script,style):
         geographies={}
+        intelligence=IntelligenceDesk(self.store.advisories(),self.store.feeds(),self.store.memberships())
         assets=self.state()['assets'];scenes=[];asset_ids=set()
         claims = []
         for claim in script['claims']:
@@ -408,7 +412,7 @@ class VisualEvidence:
         for index,claim in enumerate(claims):
             scope_text=claim.get('source_claim_text') or claim['text']
             source_id=claim.get('primary_advisory_id', claim['source_advisory_ids'][0] if claim['source_advisory_ids'] else script['advisory_id'])
-            if source_id not in geographies:geographies[source_id]=self.geography(source_id)
+            if source_id not in geographies:geographies[source_id]=self.geography(source_id,intelligence)
             geography=geographies[source_id]
             features=geography['geojson']['features'];kinds={f['properties']['kind'] for f in features}
             source_advisory=self.store.advisory(source_id)

@@ -3,6 +3,7 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const net = require('node:net');
+const { packagedEnvironment } = require('./runtime.cjs');
 let backend;
 let quitting = false;
 
@@ -25,6 +26,7 @@ async function startBackend() {
   const python = app.isPackaged
     ? path.join(root, 'backend-runtime', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
     : process.env.WETHA_PYTHON || path.join(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  if (app.isPackaged && !fs.existsSync(python)) throw new Error('This app bundle is incomplete. Re-download the complete application.');
   if (!fs.existsSync(python)) throw new Error('Python runtime is missing. Follow README.md for development setup. Packaged apps require a platform-native backend-runtime bundle.');
   const portFile = path.join(app.getPath('userData'), 'desktop-port.txt');
   let savedPort = 0;
@@ -33,9 +35,10 @@ async function startBackend() {
   const port = await freePort(Number.isInteger(requestedPort) && requestedPort >= 1024 && requestedPort <= 65535 ? requestedPort : 0);
   fs.writeFileSync(portFile, String(port));
   const endpoint = `http://127.0.0.1:${port}`;
+  const environment = app.isPackaged ? packagedEnvironment(root,process.platform,process.env) : {...process.env};
   // The backend origin guard needs the chosen loopback origin too.
   backend = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(port)], {
-    cwd: path.join(root, 'backend'), env: { ...process.env, WETHA_DATA_DIR: path.join(app.getPath('userData'), 'data'), WETHA_UI_DIR: path.join(root, app.isPackaged ? 'ui' : 'dist'), WETHA_DESKTOP_ORIGIN: endpoint },
+    cwd: path.join(root, 'backend'), env: { ...environment, WETHA_DATA_DIR: path.join(app.getPath('userData'), 'data'), WETHA_UI_DIR: path.join(root, app.isPackaged ? 'ui' : 'dist'), WETHA_DESKTOP_ORIGIN: endpoint },
     stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
   });
   const log = fs.createWriteStream(path.join(app.getPath('userData'), 'backend.log'), { flags: 'a' });
@@ -66,10 +69,16 @@ async function launch() {
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event, url) => { if (new URL(url).origin !== uiURL) event.preventDefault(); });
-  await win.loadURL(uiURL);
+  // Keep browser drafts, but invalidate a cached HTML entry point after a UI rebuild/update.
+  const root = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../..');
+  const entry = path.join(root, app.isPackaged ? 'ui' : 'dist', 'index.html');
+  await win.loadURL(`${uiURL}/?build=${fs.statSync(entry).mtimeMs}`);
 }
 
+if(process.env.WETHA_TEST_USER_DATA) {fs.mkdirSync(process.env.WETHA_TEST_USER_DATA,{recursive:true});app.setPath('userData',process.env.WETHA_TEST_USER_DATA);}
 if (!app.requestSingleInstanceLock()) app.quit();
-else app.whenReady().then(launch).catch(error => { dialog.showErrorBox('Startup failed', error.message); app.quit(); });
+else {
+  app.whenReady().then(launch).catch(error => { dialog.showErrorBox('Startup failed', error.message); app.quit(); });
+}
 app.on('before-quit', () => { quitting = true; if (backend) backend.kill(); });
 app.on('window-all-closed', () => app.quit());

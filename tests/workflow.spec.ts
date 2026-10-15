@@ -88,13 +88,14 @@ test('capabilities and planned modules report actual state', async ({page}) => {
   await expect(page.getByText('Phase 6 · not connected')).toBeVisible();
   await page.getByRole('button', {name:'Settings', exact:false}).click();
   await expect(page.getByRole('heading', {name:'Runtime capabilities'})).toBeVisible();
-  await expect(page.locator('.settings-rows')).toContainText('ffmpeg');
+  await expect(page.locator('.panel').filter({has:page.getByRole('heading',{name:'Runtime capabilities',exact:true})})).toContainText('ffmpeg');
   await page.setViewportSize({width:390,height:844});
   await expect(page.getByRole('heading', {name:'Settings', exact:true})).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test('intelligence filters, verification timeline and paused polling settings work', async ({page, request}) => {
+  await request.post('/api/training/load');
   await page.goto('/');
   await expect(page.getByText('Local service connected')).toBeVisible();
   await page.getByRole('button', {name:'Weather Intelligence', exact:true}).click();
@@ -612,6 +613,7 @@ test('Create Video builds ordered flowing narration and restores unfinished work
   await page.getByRole('button',{name:'Create Video',exact:true}).click();
   await expect(page.getByLabel('SCRIPT FOR NEW PLAN')).not.toBeVisible();
   await page.getByLabel('Bulletin target length').selectOption('60');
+  await page.getByRole('button',{name:/Show \d+ older or expired/}).click();
   const topics=page.getByRole('group',{name:'Bulletin stories',exact:true});
   await topics.getByRole('checkbox',{name:/training:cyclone:1$/}).check();
   await topics.getByRole('checkbox',{name:/training:cyclone:2$/}).check();
@@ -630,10 +632,12 @@ test('Create Video builds ordered flowing narration and restores unfinished work
   const unfinished=script.text+'\n\nAn unfinished editorial note.';
   await page.getByLabel('EDIT COMPLETE NARRATION').fill(unfinished);
   await page.getByLabel('Bulletin editor name').fill('Local editor');
+  await page.getByLabel('Bulletin revision note').fill('Unfinished narration revision');
   await page.reload();
   await page.getByRole('button',{name:'Create Video',exact:true}).click();
   await expect(page.getByLabel('EDIT COMPLETE NARRATION')).toHaveValue(unfinished);
   await expect(page.getByLabel('Bulletin editor name')).toHaveValue('Local editor');
+  await expect(page.getByLabel('Bulletin revision note')).toHaveValue('Unfinished narration revision');
   await expect(page.getByLabel('Bulletin target length')).toHaveValue('60');
   await expect(page.getByLabel('PRODUCTION SCENE PLAN',{exact:true})).toHaveValue(originalPlan);
   await expect(page.locator('#production-voiceover')).toBeVisible();
@@ -691,4 +695,96 @@ test('Create Video automatically saves refined narration without paragraph dropd
   expect(saved.claims.every((c:any)=>c.status==='requires_verification')).toBe(true);
   await expect(page.locator('#production-voiceover')).toContainText('script revision 2');
   await expect(page.getByRole('button',{name:'Make final video',exact:true})).toBeEnabled();
+});
+
+test('Save narration confirms unchanged text is already saved without creating another revision', async ({page,request})=>{
+  await request.post('/api/training/load');
+  const script=await (await request.post('/api/newsroom/runs',{data:{advisory_id:'training:cyclone:1',advisory_ids:['training:cyclone:1','training:cyclone:2'],engine:'deterministic',refresh_sources:false,bulletin:true,target_minutes:10}})).json();
+  await page.goto('/');
+  await page.evaluate(s=>localStorage.setItem('wetha-bulletin-builder-v1',JSON.stringify({scriptId:s.id,unsavedText:s.text,baseRevision:s.revision,editing:true,editor:'Local editor'})),script);
+  await page.reload();await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await expect(page.getByLabel('EDIT COMPLETE NARRATION')).toHaveValue(script.text);
+  await expect(page.getByText('No unsaved text changes.',{exact:false})).toBeVisible();
+  const save=page.getByRole('button',{name:'Save narration',exact:true});
+  await expect(save).toBeEnabled();await save.click();
+  await expect(page.getByLabel('Narration save status')).toContainText(`Narration is already saved as revision ${script.revision}`);
+  await expect(page.getByRole('button',{name:'Edit narration',exact:true})).toBeVisible();
+  expect((await (await request.get(`/api/scripts/${script.id}`)).json()).revision).toBe(script.revision);
+});
+
+test('Save narration validates beside the button, maps sources automatically and preserves a successful save if scene preparation fails', async ({page,request})=>{
+  await request.post('/api/training/load');
+  const script=await (await request.post('/api/newsroom/runs',{data:{advisory_id:'training:cyclone:1',advisory_ids:['training:cyclone:1','training:cyclone:2'],engine:'deterministic',refresh_sources:false,bulletin:true,target_minutes:10}})).json();
+  const text='The first storm report describes its winds and official guidance.\n\nThe next report provides an update. Follow the official advice for your area.';
+  await page.goto('/');
+  await page.evaluate(s=>localStorage.setItem('wetha-bulletin-builder-v1',JSON.stringify({scriptId:s.id,unsavedText:'Too short',baseRevision:s.revision,editing:true})),script);
+  await page.reload();await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  const save=page.getByRole('button',{name:'Save narration',exact:true});
+  await expect(save).toBeEnabled();await save.click();
+  await expect(page.getByLabel('Narration save status')).toContainText('between 50 and 60,000 characters');
+  await page.getByLabel('EDIT COMPLETE NARRATION').fill(text);await save.click();
+  await expect(page.getByLabel('Narration save status')).toContainText('Enter your editor name before saving');
+  await page.getByLabel('Bulletin editor name').fill('Local editor');
+  await page.route('**/api/visuals/plans',route=>route.fulfill({status:503,json:{detail:'Test scene service unavailable'}}));
+  const response=page.waitForResponse(r=>r.url().endsWith('/polished')&&r.request().method()==='POST');
+  await save.click();
+  const saved=await (await response).json();
+  expect(saved.revision).toBe(script.revision+1);expect(saved.polished_narration).toBe(true);
+  expect(saved.claims.every((c:any)=>c.primary_advisory_id)).toBe(true);
+  await expect(page.getByLabel('Narration save status')).toContainText(`Narration saved as revision ${saved.revision}, but scenes could not be prepared`);
+  await expect(page.locator('#bulletin-narration .bulletin-text')).toContainText('The first storm report');
+  expect((await (await request.get(`/api/scripts/${script.id}`)).json()).text).toBe(text);
+  await page.unroute('**/api/visuals/plans');
+  await page.getByRole('button',{name:'Use this narration for video',exact:true}).click();
+  await expect(page.locator('#production-voiceover')).toContainText(`script revision ${saved.revision}`);
+  await expect(page.getByLabel('Narration save status').getByRole('alert')).not.toBeVisible();
+});
+
+test('Settings exposes safe storage cleanup and the actual render encoder',async({page})=>{
+  await page.goto('/');
+  await page.getByRole('button',{name:'Settings',exact:false}).click();
+  const panel=page.getByRole('region',{name:'Storage and performance'});
+  await expect(panel.getByText('Video encoding:',{exact:false})).toBeVisible();
+  await expect(panel.getByRole('button',{name:'Clear scene cache',exact:true})).toBeEnabled();
+  await panel.getByRole('button',{name:'Clear source response cache',exact:true}).click();
+  await expect(panel.getByRole('status')).toContainText('scripts, uploads and final videos are preserved');
+  await expect(panel.getByRole('button',{name:'Compact database',exact:true})).toBeEnabled();
+});
+
+test('Create Video recovers from a failed workspace load without discarding a saved draft',async({page,request})=>{
+  await request.post('/api/training/load');
+  const script=await(await request.post('/api/scripts',{data:{advisory_id:'training:cyclone:2'}})).json();
+  const saved={ids:['training:cyclone:2'],minutes:10,scriptId:script.id,editing:true,baseRevision:script.revision,
+    editor:'Recovery test',note:'Keep my work',unsavedText:'An unfinished narration stays saved while the connection recovers.'};
+  await page.goto('/');
+  await page.evaluate(value=>localStorage.setItem('wetha-bulletin-builder-v1',JSON.stringify(value)),saved);
+  let failures=0;
+  await page.route('**/api/production',async route=>{if(failures++<2)await route.abort('failed');else await route.continue();});
+  await page.getByRole('button',{name:'Create Video',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Retry loading workspace',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Retry loading workspace',exact:true}).click();
+  await expect(page.getByLabel('EDIT COMPLETE NARRATION',{exact:true})).toHaveValue(saved.unsavedText);
+  await expect(page.getByLabel('Bulletin editor name',{exact:true})).toHaveValue(saved.editor);
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('wetha-bulletin-builder-v1')??'{}'))).toMatchObject(saved);
+});
+
+
+test('storage cleanup buttons fit inside the panel at desktop and narrow widths',async({page})=>{
+  await page.goto('/');
+  await page.getByRole('button',{name:'Settings',exact:false}).click();
+  const panel=page.getByRole('region',{name:'Storage and performance'});
+  const names=['Clear scene cache','Clear temporary files','Clear source response cache','Compact database'];
+  await expect(panel.getByRole('button',{name:names[3],exact:true})).toBeVisible();
+  for(const width of [1440,1200,1000,390]){
+    await page.setViewportSize({width,height:1000});
+    const bounds=await panel.boundingBox();
+    for(const name of names){
+      const button=panel.getByRole('button',{name,exact:true});
+      await expect(button).toBeVisible();
+      const box=await button.boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(bounds!.x);
+      expect(box!.x+box!.width).toBeLessThanOrEqual(bounds!.x+bounds!.width+1);
+    }
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  }
 });

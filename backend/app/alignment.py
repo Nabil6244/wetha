@@ -10,6 +10,12 @@ from pathlib import Path
 from uuid import uuid4
 
 
+class AlignmentBusy(ValueError):
+    def __init__(self, job_id):
+        self.job_id = job_id
+        super().__init__('Another recording is being aligned. Waiting for it to finish.')
+
+
 def tokens(text):
     return re.findall(r"[a-z0-9]+",text.lower())
 
@@ -105,7 +111,7 @@ class AlignmentJobs:
             for job in self.jobs.values():
                 if job['status'] in ('queued','running'):
                     if job['plan_id']==plan_id and job['narration_id']==narration_id:return copy.deepcopy(job)
-                    raise ValueError('Another recording is being aligned. Wait for it to finish.')
+                    raise AlignmentBusy(job['id'])
             identity=str(uuid4())
             job={'id':identity,'plan_id':plan_id,'narration_id':narration_id,'script_revision':plan['script_revision'],
                  'script_text_checksum':plan['script_text_checksum'],'audio_checksum':asset['checksum'],
@@ -148,7 +154,11 @@ class AlignmentJobs:
             local=Path(__file__).resolve().parents[2]/'.local/speech-model'
             model_root=Path(os.environ.get('WETHA_SPEECH_CACHE',local if local.exists() else self.directory.parent/'speech-model'))
             self.update(identity,status='running',stage='Loading local English speech model')
-            model=WhisperModel('base.en',device='cpu',compute_type='int8',cpu_threads=4,download_root=str(model_root))
+            bundled=os.environ.get('WETHA_SPEECH_MODEL_PATH')
+            if bundled:
+                model=WhisperModel(bundled,device='cpu',compute_type='int8',cpu_threads=4,local_files_only=True)
+            else:
+                model=WhisperModel('base.en',device='cpu',compute_type='int8',cpu_threads=4,download_root=str(model_root))
             segments,_=model.transcribe(str(path),language='en',word_timestamps=True,beam_size=5,vad_filter=True,condition_on_previous_text=False)
             words=[]
             for segment in segments:

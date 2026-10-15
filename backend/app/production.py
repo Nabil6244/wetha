@@ -20,10 +20,11 @@ from concurrent.futures.process import BrokenProcessPool
 from PIL import Image, ImageDraw, ImageFont
 
 from .storage import RevisionConflict, now
+from . import alert_facts
 from . import cinematic, broadcast, media_selection, regional, footage_library, audio_polish, production_report, packaging
 
 MAX_UPLOAD = 250 * 1024 * 1024
-RENDERER_VERSION = 17
+RENDERER_VERSION = 18
 MAX_MAP_SHOT_SECONDS = 10
 MAX_PROGRAM_SECONDS = 7200
 EXTENSIONS = {'image': {'.png', '.jpg', '.jpeg', '.webp'}, 'video': {'.mp4', '.mov', '.mkv', '.webm'},
@@ -46,14 +47,14 @@ def still_motion(frames, seed):
 def render_workers():
     """Scenes rendered at once. Each uses two encoder threads; leave room for the app."""
     try:
-        return max(1, int(os.environ['WETHA_RENDER_WORKERS']))
+        return max(1, min(4, int(os.environ['WETHA_RENDER_WORKERS'])))
     except (KeyError, ValueError):
-        return max(1, min(4, (os.cpu_count() or 2) // 2))
+        return max(1, min(2, (os.cpu_count() or 2) // 2))
 
 
 def final_encoder(seconds):
-    """Long programs use the hardware encoder when present; WETHA_VIDEO_ENCODER overrides."""
-    preference = os.environ.get('WETHA_VIDEO_ENCODER') or ('auto' if seconds >= 600 else 'software')
+    """Probe hardware encoding once; retain the software fallback and explicit override."""
+    preference = os.environ.get('WETHA_VIDEO_ENCODER', 'auto')
     return broadcast.encoder_args(preference)
 
 
@@ -157,14 +158,26 @@ class Production:
         return {'runtime': self.runtime(), 'media': [m for m in library if not m.get('quarantined')],
                 'quarantined_media': [{k: m.get(k) for k in ('id', 'name', 'kind', 'context', 'license', 'attribution', 'source', 'bytes', 'seconds', 'width', 'height', 'catalog', 'quarantined')}
                                       for m in library if m.get('quarantined')],
-                'timelines': list(described.values()),
-                'renders': [{**r, 'timeline_state':described[r['timeline_id']]} for r in self.store.production_list('renders')],
+                'timelines': [self._light_scenes(t) for t in described.values()],
+                'renders': [{**r, 'snapshot':self._without_scenes(r.get('snapshot')), 'timeline_state':self._without_scenes(described[r['timeline_id']])}
+                            for r in self.store.production_list('renders')],
                 'benchmark': self.benchmark_info(), 'complete_episode': self.episode_info(),
                 'hour_graphics': self.hour_graphics_info(), 'documentary': self.documentary_info(),
                 'regional_chapter': self.regional_chapter_info(),
                 'forecast_news': self.forecast_news_info(), 'user_report': self.user_report_info(),
                 'manual_footage_folder': str(self.manual_folder),
                 'regions': regional.options(), 'regional_coverage': regional.coverage(self.store.visual_plans(), self.store.production_list('media'))}
+
+    @staticmethod
+    def _light_scenes(timeline):
+        # Scene map/graphic parameters are rebuilt server-side at render time; the editor never reads them.
+        scenes=[{k:v for k,v in scene.items() if k!='parameters'} for scene in timeline.get('scenes',[])]
+        return {**timeline,'scenes':scenes}
+
+    @staticmethod
+    def _without_scenes(timeline):
+        # The render list only shows titles and status; embedding every render's full scene data made this response hundreds of MB.
+        return {k:v for k,v in timeline.items() if k!='scenes'} if isinstance(timeline,dict) else timeline
 
     def user_report_info(self):
         folder = Path(__file__).resolve().parents[2] / '.local/exports/user-voiceover-v2'
@@ -670,16 +683,18 @@ class Production:
                            'selection_catalog': asset.get('catalog', {}) if asset else {},
                            'observations': observations if not asset else []})
         audit = script.get('preview_audit')
+        story_geographies = {}
         if audit and audit['ready']:
             from .visuals import VisualEvidence
+            from .intelligence import IntelligenceDesk
             visual = VisualEvidence(self.store)
+            intelligence=IntelligenceDesk(self.store.advisories(),self.store.feeds(),self.store.memberships())
             support = {r['claim_id']:r for r in audit['claims']}
-            geography = {}
             for scene in scenes:
                 row = support.get(scene.get('claim_id'))
                 if not row or not row['primary_advisory_id']:continue
                 identity = row['primary_advisory_id']
-                if identity not in geography:geography[identity] = visual.geography(identity)
+                if identity not in story_geographies:story_geographies[identity] = visual.geography(identity,intelligence)
                 p = scene['parameters']
                 if p.get('source_advisory_id') != identity:
                     # Remove layers tied to the previous story rather than reattribute them.
@@ -688,8 +703,8 @@ class Production:
                     if scene['type'] in ('satellite_timelapse','satellite_wide','radar_animation'):
                         scene['type']='cinematic_weather_map'
                 for source_id in row['source_advisory_ids']:
-                    if source_id not in geography:geography[source_id]=visual.geography(source_id)
-                own,cited=scene_geography(identity,row['source_advisory_ids'],lambda i:geography[i]['geojson'])
+                    if source_id not in story_geographies:story_geographies[source_id]=visual.geography(source_id,intelligence)
+                own,cited=scene_geography(identity,row['source_advisory_ids'],lambda i:story_geographies[i]['geojson'])
                 p.update(source_advisory_id=identity,geojson=own)
                 if cited:p['cited_geojson']=cited
                 else:p.pop('cited_geojson',None)
@@ -718,7 +733,7 @@ class Production:
                         layers=['ground'],fallback='Imported contextual media; event/date/location attribution is not verified.')
                 if scene['parameters'].get('story'):
                     scene['parameters']['story']['source_label'] = script['label']
-                scene['parameters']['facts'] = advisory.facts
+                scene['parameters']['facts'] = {**advisory.facts, **(alert_facts.extract(advisory.text) if advisory.provider == 'NWS' else {})}
                 if not scene['parameters'].get('geojson'):
                     # Borrow geography only from the same story; another topic's area would mislocate this one.
                     scene['parameters']['geojson'] = next((s['parameters']['geojson'] for s in scenes if s['parameters'].get('geojson')
@@ -755,7 +770,8 @@ class Production:
                         from . import geography, observations
                         story_layers[advisory.id] = {
                             'county_shapes': geography.county_shapes(self.store, advisory) if advisory.provider == 'NWS' else [],
-                            'radar_option': observations.radar_option(self, advisory, scene['parameters'], source),
+                            'radar_option': observations.radar_option(self, advisory, scene['parameters'], source,
+                                story_geojson=story_geographies.get(advisory.id,{}).get('geojson')),
                             'satellite_option': observations.satellite_option(self, advisory, scene['parameters'], source)}
                     for key, value in story_layers[advisory.id].items():
                         if value:
@@ -769,10 +785,16 @@ class Production:
                 graph = prepare_report_graphs(scene, advisory)
                 if graph:
                     key=(graph['source_advisory_id'],tuple((c['field'],tuple(c.get('range',[]))) for c in graph['charts']))
-                    # Shots split from one section share its chart; other sections do not repeat it.
+                    # Show each source chart once; later cuts from the same paragraph need a different visual.
                     section = scene.get('parent_scene_id', scene['id'])
-                    if plotted_claims.setdefault(key, section) == section:
+                    if key not in plotted_claims:
+                        plotted_claims[key] = section
                         scene['parameters']['report_graphs'] = graph
+                        satellite = scene['parameters'].get('satellite_option')
+                        if satellite:
+                            # Keep measured charts over real, time-matched satellite pixels, as in the approved style.
+                            scene['parameters'].update(copy.deepcopy(satellite['parameters']))
+                            scene['direction'] = {**copy.deepcopy(satellite['direction']), 'duration': scene['seconds']}
         if body.automatic_graphs and body.presentation == 'broadcast':
             # Severe-weather beats get the SPC outlook valid at their story time, when one was collected.
             from . import spc
@@ -862,9 +884,19 @@ class Production:
     def story_geography(self, advisory_id):
         from .visuals import VisualEvidence
         try:
-            return VisualEvidence(self.store).geography(advisory_id)['geojson']
+            geojson = VisualEvidence(self.store).geography(advisory_id)['geojson']
         except (KeyError, ValueError):
-            return {'type': 'FeatureCollection', 'features': []}
+            geojson = {'type': 'FeatureCollection', 'features': []}
+        try:
+            advisory = self.store.advisory(advisory_id)
+        except KeyError:
+            return geojson
+        if not geojson['features'] and advisory.provider == 'NWS':
+            # Zone-based alerts have no polygon; the zones they name locate the story for radar matching.
+            from . import geography
+            geojson = {'type': 'FeatureCollection', 'features': [{'type': 'Feature', 'properties': {'kind': 'alert_zone'}, 'geometry': shape['geometry']}
+                                                                  for shape in geography.county_shapes(self.store, advisory)]}
+        return geojson
 
     def pin_observations(self, script):
         """Pin real regional imagery separately from the advisory's claim evidence."""
@@ -979,10 +1011,15 @@ class Production:
                 if not gate['allowed']:
                     raise ValueError(f"Shot {index + 1}: {media[clip]['name']} cannot be used here. {gate['reason']}")
 
-    def start(self, identity, retry_id=None):
+    def new_render(self, identity, retry_id=None, validated=None):
+        if getattr(self, 'maintenance', False):
+            raise ValueError('Storage cleanup is finishing. Try again in a moment.')
         if len(self.tasks) >= 4:
             raise ValueError('The render queue is full. Wait for a job or cancel a queued render.')
-        timeline, media = self.validate_timeline(self.store.production_get('timelines', identity))
+        timeline, media = validated or self.validate_timeline(self.store.production_get('timelines', identity))
+        required = 512_000_000 + int(timeline['seconds'] * 2_500_000)
+        if shutil.disk_usage(self.root).free < required:
+            raise ValueError(f"Not enough free disk space for the render working files (about {required / 1e9:.1f} GB estimated). Open Settings → Storage & performance, clear scene cache or free space, then retry.")
         if retry_id:
             job = self.store.production_get('renders', retry_id)
             if job['status'] not in ('failed', 'cancelled') or job['id'] in self.tasks:
@@ -998,13 +1035,46 @@ class Production:
                    'error': None, 'attempts': 1, 'snapshot': timeline, 'media': media, 'cache': {},
                    'broadcast_eligible': False, 'created_at': now(), 'validation': None, 'renderer_version': RENDERER_VERSION}
             self.store.production_save('renders', job)
-        if not retry_id:
-            self.reuse_scene_cache(job)
-            self.store.production_update_render(job)
+        return job
+
+    def launch_render(self, job):
         task = asyncio.create_task(self._render(job))
         self.tasks[job['id']] = task
         task.add_done_callback(lambda done: self.tasks.pop(job['id'], None))
         return self.describe_render(job)
+
+    def start(self, identity, retry_id=None):
+        job = self.new_render(identity, retry_id)
+        if not retry_id:
+            self.reuse_scene_cache(job)
+            self.store.production_update_render(job)
+        return self.launch_render(job)
+
+    async def start_async(self, identity, retry_id=None):
+        # File checksums, source auditing and scene-cache copies must not block status/health requests.
+        if getattr(self, 'starting', False) or getattr(self, 'maintenance', False):
+            raise ValueError('Preparing the render or finishing storage cleanup. Try again in a moment.')
+        for row in self.store.render_progress():
+            if row['id'] in self.tasks:
+                existing = self.store.production_get('renders', row['id'])
+                if existing['timeline_id'] == identity:
+                    return self.describe_render(existing)
+        self.starting = True
+        job = None
+        try:
+            validated = await asyncio.to_thread(self.validate_timeline, self.store.production_get('timelines', identity))
+            job = self.new_render(identity, retry_id, validated)
+            if not retry_id:
+                await asyncio.to_thread(self.reuse_scene_cache, job)
+                self.store.production_update_render(job)
+            return self.launch_render(job)
+        except BaseException:
+            if job is not None:
+                job.update(status='failed', stage='Render preparation interrupted', error='Render preparation could not finish. Retry to continue.')
+                self.store.production_update_render(job)
+            raise
+        finally:
+            self.starting = False
 
     def reuse_scene_cache(self, job):
         """Reuse only identical pinned scenes with validated, unchanged encoded files."""
@@ -1299,7 +1369,7 @@ class Production:
                 base = still_motion(round(cut['seconds']*30), index+cut_index) if cut_asset['kind']=='image' else footage_library.fill_filter(cut_asset)
                 await self.command(job,[*source,'-protocol_whitelist','file,pipe','-i',str(path),'-loop','1','-i',str(overlay),'-filter_complex',
                     base+';[base][1:v]overlay=0:0:format=auto[out]',
-                    '-map','[out]','-an','-frames:v',str(round(cut['seconds']*30)),'-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-threads','2',str(piece)])
+                    '-map','[out]','-an','-frames:v',str(round(cut['seconds']*30)),*final_encoder(scene['seconds']),'-pix_fmt','yuv420p','-threads','2',str(piece)])
                 files.append(f"file '{piece.name}'\n")
             listing = clip / 'cuts.txt'
             listing.write_text(''.join(files))
@@ -1314,7 +1384,7 @@ class Production:
             base=still_motion(round(seconds*30), index) if asset['kind']=='image' else footage_library.fill_filter(asset)
             await self.command(job,[*source,'-filter_complex',
                 base+';[base][1:v]overlay=0:0:format=auto[out]',
-                '-map','[out]','-an','-frames:v',str(round(seconds*30)),'-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-threads','2',str(segment)])
+                '-map','[out]','-an','-frames:v',str(round(seconds*30)),*final_encoder(scene['seconds']),'-pix_fmt','yuv420p','-threads','2',str(segment)])
         elif is_broadcast:
             before = scenes[index-1] if index else None
             previous = (before['direction'], before['parameters'], self.scene_assets(before), before['seconds']) if before and scene['parameters'].get('transition_in') else None
@@ -1351,8 +1421,7 @@ class Production:
                 filters += f",fade=t=in:st=0:d=0.25,fade=t=out:st={scene['seconds']-0.25}:d=0.25"
             filters += '[out]'
             await self.command(job, [*source, '-filter_complex', filters, '-map', '[out]', '-an',
-                                     '-frames:v', str(scene['frames']), '-c:v', 'libx264', '-preset', 'veryfast',
-                                     '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2', str(segment)],
+                                     '-frames:v', str(scene['frames']), *final_encoder(scene['seconds']), '-pix_fmt', 'yuv420p', '-threads', '2', str(segment)],
                                timeout=max(120, scene['seconds'] * 10))
         info = await asyncio.to_thread(probe, segment)
         if abs(duration(info) - (scene['seconds'] + handle)) > 0.1:

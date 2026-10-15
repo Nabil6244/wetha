@@ -60,14 +60,38 @@ def nws_graphs(scene, advisory):
     charts=[]
     narrated_values=numeric_tokens(scope)
     if not narrated_values:return None
+    if 'river' in scope or 'stage' in scope or 'crest' in scope:
+        stamp={'issued_at':advisory.issued_at.isoformat(),'advisory_id':advisory.id}
+        stage=re.search(r'at\s+\d{3,4}\s*[ap]m.{0,50}?stage was\s+(\d+(?:\.\d+)?)\s*ft',text)
+        flood=re.search(r'flood stage is\s+(\d+(?:\.\d+)?)\s*ft',text)
+        if stage and flood and stage[1] in narrated_values and flood[1] in narrated_values:
+            bars=[{'label':'Observed stage','value':float(stage[1]),'kind':'observed'},
+                  {'label':'Flood stage','value':float(flood[1]),'kind':'threshold'}]
+            historic=re.search(r'previous crest of\s+(\d+(?:\.\d+)?)\s*ft',text)
+            if historic and historic[1] in narrated_values:
+                bars.append({'label':'Previous crest','value':float(historic[1]),'kind':'historical'})
+            charts.append({'field':'river_stage','name':'River level vs flood stage','unit':'ft','kind':'comparison',
+                           'points':[{**stamp,'value':float(stage[1])}], 'bars':bars,
+                           'qualifier':'Observed / threshold / historical comparison','quote':stage[0]+'; '+flood[0]})
+        forecast=re.search(r'forecast\.\.\.(.*?)(?:- flood stage|http)',text)
+        if forecast and any(word in scope for word in ('rise','crest','forecast','morning','evening','fall')):
+            values=list(re.finditer(r'(\d+(?:\.\d+)?)\s*ft\s+([^.;]{0,45})',forecast[1]))
+            bars=[{'label':m[2].strip().capitalize()[:30],'value':float(m[1]),'kind':'forecast'}
+                  for m in values if m[1] in narrated_values][:3]
+            if bars:
+                charts.append({'field':'river_forecast','name':'Official river forecast milestones','unit':'ft','kind':'comparison',
+                               'points':[{**stamp,'value':bars[-1]['value']}], 'bars':bars,
+                               'qualifier':'Forecast milestones / not observations','quote':forecast[0]})
     specs=[('surge','Surge forecast above ground','ft',r'(\d+)\s*(?:to|and|-)\s*(\d+)\s*ft'),
            ('rain','Rainfall reported / forecast','in',r'(\d+)\s*(?:to|and|-)\s*(\d+)\s*in'),
            ('wind','Wind forecast','mph',r'(\d+)\s*(?:to|and|-)\s*(\d+)\s*mph'),
            ('gust','Forecast wind gust','mph',r'gusts(?:\s+up to)?\s*(\d+)\s*mph'),
+           ('gust','Reported wind gust threat','mph',r'(\d+)\s*mph\s*(?:wind )?gusts?'),
+           ('moving','Reported storm motion','mph',r'moving.{0,40}?(\d+)\s*mph'),
            ('moving','Reported storm motion','knots',r'moving.{0,40}?(\d+)\s*knots'),
            ('gust','Marine gust threshold','knots',r'(\d+)\s*knots\s*or greater')]
     for topic,name,unit,pattern in specs:
-        if topic not in scope:continue
+        if topic not in scope and not (topic=='moving' and any(w in scope for w in ('movement','motion'))):continue
         for m in list(re.finditer(pattern,text))[:2]:
             vals=[float(v) for v in m.groups()]
             if not all(f'{v:g}' in narrated_values for v in vals):continue
@@ -106,6 +130,16 @@ def draw(image, data, t):
         label(d, (115, top + 20), chart['name'].upper() + ' / ' + chart['unit'], 30, '#a8c4d0')
         pts = chart['points']
         latest = pts[-1]['value']
+        if chart.get('kind')=='comparison':
+            bars=chart['bars'];maximum=max(b['value'] for b in bars)*1.15 or 1
+            colors={'observed':'#65e1d1','threshold':'#ff7c7c','historical':'#a8c4d0','forecast':'#ffc887'}
+            for j,bar in enumerate(bars):
+                y=top+80+j*60
+                label(d,(115,y),bar['label'],24,'#d7e5ed')
+                d.rounded_rectangle((510,y,510+550*bar['value']/maximum*u,y+30),radius=5,fill=colors[bar['kind']])
+                label(d,(1090,y),f"{bar['value']:g}",27,colors[bar['kind']])
+            label(d,(115,top+270),chart['qualifier'],22,'#a8c4d0')
+            continue
         if chart.get('range'):
             values=chart['range'];maximum=max(values)*1.4 or 1
             shown='–'.join(f'{v:g}' for v in values)

@@ -1,5 +1,6 @@
 export type Fact = string | number | null;
 export interface Advisory {
+  detail_available?: boolean;
   id: string; provider: 'NHC' | 'NWS' | 'TRAINING'; event_key: string; title: string;
   issued_at: string; expires_at: string | null; source_url: string; provenance: string;
   severity: string; area: string; text: string; facts: Record<string, Fact>;

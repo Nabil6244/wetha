@@ -5,6 +5,8 @@ import json
 import logging
 import os
 import shutil
+import errno
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import unquote
@@ -53,6 +55,10 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         app.state.footage_expansion = FootageExpansion(app.state.discovery)
         from .orchestrator import Orchestrator
         app.state.orchestrator = Orchestrator(store, app.state.production, app.state.alignment, app.state.footage_expansion, prepare_production, app.state.visuals)
+        from .maintenance import cleanup
+        # Only regenerable, terminal render files; exports and uploaded media are never candidates.
+        await asyncio.to_thread(cleanup, store, 'scene_cache', 30)
+        await asyncio.to_thread(cleanup, store, 'temporary')
         collector.start()
         logger.info(json.dumps({"event":"backend_ready", "database":str(store.path)}))
         try:
@@ -76,7 +82,11 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         origin = request.headers.get("origin")
         if origin and origin not in ("http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:8000", "http://localhost:8000", os.environ.get("WETHA_DESKTOP_ORIGIN")):
             return JSONResponse({"detail":"Origin is not allowed"}, status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        if not request.url.path.startswith(('/api/', '/assets/')):
+            # A desktop update must load its current entry point, not an old cached script list.
+            response.headers['Cache-Control'] = 'no-store'
+        return response
 
     @app.exception_handler(ValueError)
     async def invalid_request(request, error):
@@ -89,6 +99,45 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
     @app.exception_handler(RevisionConflict)
     async def revision_conflict(request, error):
         return JSONResponse({'detail':str(error)}, status_code=409)
+
+    @app.exception_handler(OSError)
+    async def filesystem_error(request, error):
+        logger.exception('Filesystem operation failed', exc_info=error)
+        if error.errno == errno.ENOSPC:
+            return JSONResponse({'detail':'The disk is full. Open Settings → Storage & performance to clear regenerable cache, then retry.'}, status_code=507)
+        return JSONResponse({'detail':'The app could not access a local file. Check that the file still exists and its folder is writable, then retry.'}, status_code=500)
+
+    @app.exception_handler(sqlite3.OperationalError)
+    async def database_error(request, error):
+        logger.exception('Database operation failed', exc_info=error)
+        if 'locked' in str(error).lower() or 'busy' in str(error).lower():
+            return JSONResponse({'detail':'The database is busy finishing another operation. Wait a moment and retry.'}, status_code=503)
+        return JSONResponse({'detail':'The database operation could not finish. Your saved work is retained; restart the app and retry.'}, status_code=500)
+
+    def storage_busy():
+        production = app.state.production
+        return bool(production.tasks or getattr(production, 'starting', False) or app.state.orchestrator.tasks or
+                    any(j['status'] in ('queued', 'running') for j in app.state.alignment.jobs.values()) or
+                    app.state.collector.inflight or app.state.visuals.pending)
+
+    @app.get('/api/storage')
+    def storage_status():
+        from .maintenance import summary
+        from .production import render_workers, final_encoder
+        return {**summary(store), 'busy': storage_busy() or getattr(app.state.production, 'maintenance', False),
+                'render_workers': render_workers(), 'video_encoder': final_encoder(0)[1]}
+
+    @app.post('/api/storage/cleanup/{kind}')
+    async def storage_cleanup(kind: str):
+        from .maintenance import cleanup
+        production = app.state.production
+        if getattr(production, 'maintenance', False) or storage_busy():
+            raise HTTPException(409, 'Wait for production or collection to finish before clearing storage.')
+        production.maintenance = True
+        try:
+            return await asyncio.to_thread(cleanup, store, kind)
+        finally:
+            production.maintenance = False
 
     def desk():
         return IntelligenceDesk(store.advisories(), store.feeds(), store.memberships())
@@ -104,9 +153,9 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         reviews = store.reviews(document['id'])
         review = next((row for row in reviews if row['revision'] == document['revision']), None)
         result = evaluate(document, intelligence, evidence, review)
-        if document.get('polished_narration'):
+        if document.get('polished_narration') or result.get('claims'):
             from .preview_audit import audit
-            result['preview_audit'] = audit(document, evidence)
+            result['preview_audit'] = audit({**document, 'claims': document.get('claims') or result['claims']}, evidence)
         result['is_latest'] = document['revision'] == store.script(document['id']).get('revision', 1)
         if not result['is_latest']:
             result['editorial']['can_review'] = False
@@ -127,7 +176,7 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
             "rendering":bool(shutil.which('ffmpeg') and shutil.which('ffprobe')), "native_backend_bundle":False}}
 
     @app.get("/api/dashboard")
-    def dashboard():
+    def dashboard(compact: bool = False):
         scripts = store.scripts()
         intelligence = desk()
         advisories = intelligence.items
@@ -136,10 +185,17 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
         latest = next((a for a in advisories if a.provenance == "official_fetch"), None)
         runs = store.runs()
         last_steps = {step['agent']:step for step in store.run(runs[0]['id'])['steps']} if runs else {}
+        if compact:
+            # Lists need names/status, not every alert's polygon, long text and duplicated changes.
+            described = [{**{k:a[k] for k in ('id','provider','event_key','title','issued_at','expires_at','source_url',
+                'provenance','severity','area','freshness','previous_id','event_id','superseded_by','priority','comparison')},
+                'text':'','facts':{},'changes':[],'warnings':[],'forecast_excerpt':None,'detail_available':False,
+                'verification':{'status':a['verification']['status'],'checks':[], 'manual_review_required':True,'confidence_note':''}}
+                for a in described]
         return {"channel":store.channel(), "advisories":described, "scripts":[describe_script(s, intelligence) for s in scripts], "jobs":store.jobs(),
             "intelligence":{"feeds":store.feeds(), "events":intelligence.events(), "quarantine":store.quarantine()},
             "stats":{"stored_advisories":len(advisories), "current_alerts":len(current), "scripts":len(scripts),
-                     "programs":sum(r['status'] == 'succeeded' for r in store.production_list('renders'))},
+                     "programs":store.production_count('renders','succeeded')},
             "latest_official_issue":latest.issued_at.isoformat() if latest else None,
             "newsroom":{"runs":runs, "engines":model_status()},
             "broadcast":{"status":"not_configured", "obs_connected":False, "queue":[], "fallback_ready":False},
@@ -499,8 +555,7 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
     @app.get('/api/production/progress')
     def production_progress():
         # Polling an encoder must not repeatedly rebuild weather intelligence or plans.
-        keys = ('id', 'status', 'stage', 'progress', 'error', 'validation', 'attempts')
-        return {'renders':[{k:r.get(k) for k in keys} for r in store.production_list('renders')]}
+        return {'renders':store.render_progress()}
 
     @app.get('/api/production/benchmark/{kind}')
     def historical_benchmark(kind: str):
@@ -685,12 +740,12 @@ def create_app(data_dir: Path | None = None, source_transport=None, model_transp
 
     @app.post('/api/production/renders')
     async def start_render(body: RenderRequest):
-        return app.state.production.start(body.timeline_id)
+        return await app.state.production.start_async(body.timeline_id)
 
     @app.post('/api/production/renders/{identity}/retry')
     async def retry_render(identity: str):
         job = store.production_get('renders', identity)
-        return app.state.production.start(job['timeline_id'], identity)
+        return await app.state.production.start_async(job['timeline_id'], identity)
 
     @app.post('/api/production/renders/{identity}/cancel')
     async def cancel_render(identity: str):

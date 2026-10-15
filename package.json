@@ -15,8 +15,9 @@
     "test": "node scripts/backend.cjs test",
     "test:ui": "playwright test",
     "package:dir": "node scripts/check-runtime.cjs && npm run build && electron-builder --dir",
-    "package:win": "node scripts/check-runtime.cjs win32 && npm run build && electron-builder --win nsis --x64",
-    "package:mac": "node scripts/check-runtime.cjs darwin && npm run build && electron-builder --mac dmg"
+    "package:win": "node scripts/check-runtime.cjs win32 && npm run build && electron-builder --win portable --x64 --publish never",
+    "package:mac": "node scripts/check-runtime.cjs darwin && npm run build && electron-builder --mac dmg --publish never",
+    "package:win:setup": "node scripts/check-runtime.cjs win32 && npm run build && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
     "lucide-react": "1.52.0",
@@ -54,7 +55,9 @@
         "filter": [
           "app/**",
           "migrations/**",
-          "requirements.lock"
+          "requirements.lock",
+          "requirements-speech.txt",
+          "requirements-standalone.lock"
         ]
       },
       {
@@ -67,11 +70,16 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "portable"
     },
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.weather"
+      "category": "public.app-category.weather",
+      "artifactName": "Weather-Intelligence-Studio-${version}-macOS-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Weather-Intelligence-Studio-${version}-Windows-${arch}.exe",
+      "requestExecutionLevel": "user"
     }
   }
 }

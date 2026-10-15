@@ -51,10 +51,10 @@ def prepare(document: dict, evidence: list[Advisory]) -> dict:
     return document
 
 
-def edited(document: dict, text: str, evidence: list[Advisory]) -> dict:
+def edited(document: dict, text: str, evidence: list[Advisory], allow_same: bool = False) -> dict:
     result = copy.deepcopy(document)
     result['text'] = '\n\n'.join(part.strip() for part in text.split('\n\n') if part.strip())
-    if result['text'] == document['text']:
+    if result['text'] == document['text'] and not allow_same:
         raise ValueError('No text changes to save.')
     result['claims'] = blocks_for(result, evidence, document.get('claims', []))
     reset_review(result)

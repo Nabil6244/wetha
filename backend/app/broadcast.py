@@ -9,6 +9,7 @@ import io
 import json
 import math
 import os
+import sys
 import subprocess
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -489,14 +490,18 @@ def story_caption(draw, story, t=1, footage=False):
 
 
 @lru_cache(maxsize=2)
-def encoder_args(preference='software'):
+def encoder_args(preference='auto'):
     if preference=='auto':
-        try:
-            subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','color=s=320x180:r=30:d=0.04',
-                            '-frames:v','1','-c:v','h264_videotoolbox','-allow_sw','0','-f','null','-'],
-                           stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=10,check=True)
-            return ['-c:v','h264_videotoolbox','-b:v','8M']
-        except (OSError,subprocess.SubprocessError):pass
+        candidates = ([['-c:v','h264_videotoolbox','-allow_sw','0','-b:v','8M']] if sys.platform == 'darwin' else
+                      [['-c:v','h264_nvenc','-b:v','8M'], ['-c:v','h264_qsv','-b:v','8M'],
+                       *([['-c:v','h264_amf','-b:v','8M']] if sys.platform == 'win32' else [])])
+        for arguments in candidates:
+            try:
+                subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','color=s=320x180:r=30:d=0.04',
+                                '-frames:v','1','-pix_fmt','yuv420p',*arguments,'-f','null','-'],
+                               stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=5,check=True)
+                return arguments
+            except (OSError,subprocess.SubprocessError):pass
     return ['-c:v','libx264','-preset','veryfast','-crf','20']
 
 
@@ -540,7 +545,7 @@ async def render_clip(direction, parameters, output, load_asset=None, seconds=No
     outgoing=await asyncio.to_thread(last_frame,*previous) if previous and kind else None
     log=Path(output).with_suffix('.log')
     with log.open('wb') as errors:
-        process=await asyncio.create_subprocess_exec('ffmpeg','-y','-hide_banner','-loglevel','warning','-f','rawvideo','-pix_fmt','rgb24','-s','1920x1080','-r','30','-i','pipe:0','-an','-frames:v',str(count),*encoder_args(os.environ.get('WETHA_VIDEO_ENCODER','software')),'-pix_fmt','yuv420p','-threads','2',str(output),stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.DEVNULL,stderr=errors)
+        process=await asyncio.create_subprocess_exec('ffmpeg','-y','-hide_banner','-loglevel','warning','-f','rawvideo','-pix_fmt','rgb24','-s','1920x1080','-r','30','-i','pipe:0','-an','-frames:v',str(count),*encoder_args(os.environ.get('WETHA_VIDEO_ENCODER','auto')),'-pix_fmt','yuv420p','-threads','2',str(output),stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.DEVNULL,stderr=errors)
         try:
             span=parameters.get('camera_span')
             for i in range(count):
@@ -571,7 +576,7 @@ def render_clip_blocking(direction, parameters, output, assets, seconds, previou
     span=parameters.get('camera_span')
     with Path(output).with_suffix('.log').open('wb') as errors:
         process=subprocess.Popen(['ffmpeg','-y','-hide_banner','-loglevel','warning','-f','rawvideo','-pix_fmt','rgb24','-s','1920x1080','-r','30','-i','pipe:0',
-                                  '-an','-frames:v',str(count),*encoder_args(os.environ.get('WETHA_VIDEO_ENCODER','software')),'-pix_fmt','yuv420p','-threads','2',str(output)],
+                                  '-an','-frames:v',str(count),*encoder_args(os.environ.get('WETHA_VIDEO_ENCODER','auto')),'-pix_fmt','yuv420p','-threads','2',str(output)],
                                  stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=errors)
         try:
             for i in range(count):

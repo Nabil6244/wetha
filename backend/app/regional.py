@@ -13,9 +13,14 @@ def options():
 
 
 def named_regions(text):
+    return list(_named_regions(text))
+
+
+@lru_cache(maxsize=4096)
+def _named_regions(text):
     # Full names avoid treating ordinary words such as IN, OR and ME as states.
-    return [r['code'] for r in catalogue()['regions']
-            if re.search(r'(?<!\w)'+re.escape(r['name'])+r'(?!\w)'+(r'(?!\s+River\b)' if r['code']=='MS' else ''),text,re.I)]
+    return tuple(r['code'] for r in catalogue()['regions']
+            if re.search(r'(?<!\w)'+re.escape(r['name'])+r'(?!\w)'+(r'(?!\s+River\b)' if r['code']=='MS' else ''),text,re.I))
 
 
 def targets(scene):
@@ -75,8 +80,8 @@ def location_status(scene,asset):
     return 'unverified'
 
 
-def match_media(scene,asset):
-    wanted=targets(scene)
+def match_media(scene,asset,wanted=None):
+    if wanted is None:wanted=targets(scene)
     if not wanted:return True
     cat=asset.get('catalog',{})
     return bool(cat.get('location_reviewed') and cat.get('reference') and set(wanted)&set(cat.get('region_codes',[])))
@@ -142,7 +147,9 @@ def focus(scene,media,presentation,allow_unverified=False):
     if cited_names:p['regional_cited']=cited_names;p['regional_cited_codes']=cited
     else:p.pop('regional_cited',None);p.pop('regional_cited_codes',None)
     p['regional_cartography']={k:catalogue()[k] for k in ('source_url','source_checksum','year','note')}
-    p['facts']={} # Prevent automatically drawing storm-wide winds/pressure over a local scene.
+    # Prevent automatically drawing storm-wide winds/pressure over a local scene; values an NWS alert states for its own area stay.
+    from .alert_facts import KEYS
+    p['facts']={k:v for k,v in p.get('facts',{}).items() if k in KEYS}
     if sd.get('camera',{}).get('geographic_target') and not intersects(bounds,{'coordinates':sd['camera']['geographic_target']}):
         sd['camera'].update(geographic_target=None,movement='smooth_zoom_in')
     has_data=bool(filtered or p.get('map_observations'))
@@ -161,7 +168,7 @@ def coverage(plans,assets):
         for scene in plan['scenes']:
             wanted=targets(scene)
             if wanted:
-                matches=[a['id'] for a in assets if a['kind']!='audio' and a.get('rights_confirmed') and match_media(scene,a)]
+                matches=[a['id'] for a in assets if a['kind']!='audio' and a.get('rights_confirmed') and match_media(scene,a,wanted)]
                 rows.append({'plan_id':plan['id'],'scene_id':scene['id'],'script_segment':scene['script_segment'],
                              'regions':wanted,'matching_media_ids':matches,'needs_footage':not bool(matches),
                              'data_requirement':'Use local source measurements; storm-wide values are not local observations.'})

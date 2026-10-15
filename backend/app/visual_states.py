@@ -11,7 +11,8 @@ from . import geography, graphic_styles, visual_director
 WINDOW = 4          # A state may not return within this many shots.
 CONTENT_WINDOW = 12  # The same card for the same story may not return within this many shots.
 FACTS = {'wind_mph': ('SUSTAINED WIND', 'mph'), 'pressure_mb': ('CENTRAL PRESSURE', 'mb'),
-         'rainfall_inches': ('RAINFALL', 'in'), 'category': ('CATEGORY', ''), 'movement_mph': ('MOVEMENT', 'mph')}
+         'rainfall_inches': ('RAINFALL', 'in'), 'category': ('CATEGORY', ''), 'movement_mph': ('MOVEMENT', 'mph'),
+         'wave_ft': ('WAVE HEIGHT', 'ft'), 'tide_ft': ('HIGH TIDE', 'ft'), 'gust_mph': ('WIND GUSTS', 'mph'), 'snow_inches': ('SNOWFALL', 'in')}
 # State -> (family, base score). Families keep the rhythm alternating between maps and cards.
 STATES = {
     'wide': ('map', 3), 'push_in': ('map', 5), 'pull_out': ('map', 4), 'pan': ('map', 4),

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, AudioLines, Bell, Check, CheckCheck, ChevronDown, Clapperboard, Clock3, CloudSun, Database, Download, ExternalLink, FileText, FolderOpen, Globe2, LayoutDashboard, LoaderCircle, MonitorPlay, Play, Plus, Radio, RefreshCw, Satellite, Settings2, ShieldCheck, Sparkles, SquareArrowOutUpRight, Tv, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from './api';
@@ -7,6 +7,7 @@ import WeatherDesk from './components/WeatherDesk';
 import Newsroom from './components/Newsroom';
 import ScriptEditor from './components/ScriptEditor';
 import FootageKeys from './components/FootageKeys';
+import StorageSettings from './components/StorageSettings';
 const VisualDirector = lazy(() => import('./components/VisualDirector'));
 const Production = lazy(() => import('./components/Production'));
 
@@ -40,9 +41,19 @@ export default function App() {
   const [sourceUrl, setSourceUrl] = useState('https://www.nhc.noaa.gov/archive/2024/al14/al142024.public.013.shtml');
   const [sourceText, setSourceText] = useState('');
 
-  async function refresh() {
-    const [dashboard, currentHealth] = await Promise.all([api<Dashboard>('/dashboard'), api<Health>('/health')]);
-    setData(dashboard); setHealth(currentHealth);
+  const refreshPending = useRef<Promise<void> | null>(null);
+  function refresh(): Promise<void> {
+    if(refreshPending.current)return refreshPending.current;
+    const task=(async()=>{
+      const results=await Promise.allSettled([api<Dashboard>('/dashboard?compact=true'),api<Health>('/health')]);
+      if(results[0].status==='fulfilled')setData(results[0].value);
+      if(results[1].status==='fulfilled')setHealth(results[1].value);
+      else setHealth(null);
+      if(results[0].status==='rejected')throw results[0].reason;
+    })();
+    refreshPending.current=task;
+    void task.finally(()=>{refreshPending.current=null;}).catch(()=>{});
+    return task;
   }
   useEffect(() => { let loading=false; const update=async()=>{if(loading)return;loading=true;try{await refresh();}finally{loading=false;}}; void update().catch(e => setError(e.message)); const timer = setInterval(() => { void update().catch(() => {}); }, 15000); return () => clearInterval(timer); }, []);
   async function action(label: string, work: () => Promise<void>) {
@@ -73,13 +84,13 @@ export default function App() {
       <div className="sidebar-bottom"><div className="local-status"><span className={'dot ' + (health ? 'green' : 'amber')}/><span>{health ? 'Local service connected' : 'Connecting to local service'}</span></div><button className={page === 'Settings' ? 'active' : ''} onClick={() => setPage('Settings')}><Settings2 size={18}/>Settings<span className="version">v0.5</span></button><div className="operator"><span>WS</span><div>Local workspace<small>Phase 5 · video production</small></div><ShieldCheck size={17}/></div></div>
     </aside>
     <div className="workspace">
-      <header className="topbar"><div className="breadcrumb">Studio <span>/</span> <strong>{page === 'Video Production' ? 'Create Video' : page}</strong></div><div className="topbar-right"><span className="offline"><span className="dot"/>Broadcast offline</span><span className="top-separator"/><button className="icon-button" aria-label="Show operation log" onClick={() => setPage('AI Newsroom')}><Bell size={18}/>{data?.jobs.some(j => j.status === 'failed') && <i/>}</button><span className="avatar">WS</span></div></header>
+      <header className="topbar"><div className="breadcrumb">Studio <span>/</span> <strong>{page === 'Video Production' ? 'Create Video' : page}</strong></div><div className="topbar-right"><span className="offline"><span className="dot"/>Live streaming not configured</span><span className="top-separator"/><button className="icon-button" aria-label="Show operation log" onClick={() => setPage('AI Newsroom')}><Bell size={18}/>{data?.jobs.some(j => j.status === 'failed') && <i/>}</button><span className="avatar">WS</span></div></header>
       <main>
         <div className="page-heading"><div><span className="eyebrow">{page === 'Dashboard' ? 'YOUR WEATHER OPERATIONS, IN FOCUS' : 'WEATHER INTELLIGENCE STUDIO'}</span><h1>{page === 'Dashboard' ? 'Control center' : page === 'Video Production' ? 'Create Video' : page}</h1><p>{page === 'Dashboard' ? 'From official evidence to the next story. Every source, every step.' : page === 'Weather Intelligence' ? 'Collect official advisories. Preserve evidence. Understand what changed.' : page === 'AI Newsroom' ? 'Six editorial roles. Structured evidence. Human oversight.' : page === 'Script Editor' ? 'Source-grounded narration, with an explicit editorial gate.' : page === 'Video Production' ? 'Stories, narration, voiceover and export in one workspace.' : 'One channel. A clear path from evidence to broadcast.'}</p></div><div className="heading-actions"><button className="button secondary" disabled={!!busy} onClick={() => action('Refreshing sources', async () => {const result = await api<{feeds:{feed:string; collected?:number; rejected?:number; error?:string}[]}>('/sources/refresh', {}); const failures = result.feeds.filter(feed => feed.error); setNotice(result.feeds.map(feed => feed.error ? `${feed.feed.toUpperCase()}: collection failed — inspect source status` : `${feed.feed.toUpperCase()}: ${feed.collected} valid advisories, ${feed.rejected} quarantined`).join(' · ')); if(failures.length) setError(failures.map(feed => feed.error).join(' · '));})}><RefreshCw size={15} className={busy === 'Refreshing sources' ? 'spin' : ''}/>Refresh sources</button><button className="button primary" onClick={() => setImportOpen(true)}><Plus size={16}/>Import advisory</button></div></div>
         {error && <div role="alert" className="message error"><Bell size={16}/><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={16}/></button></div>}
         {notice && <div role="status" className="message success"><Check size={16}/><span>{notice}</span><button aria-label="Dismiss notice" onClick={() => setNotice('')}><X size={16}/></button></div>}
         {busy && <div role="status" className="working"><LoaderCircle size={15} className="spin"/>{busy}…</div>}
-        {!data ? <div className="panel"><Empty icon={Database} title="Connecting to your workspace">The local Python service provides your data. Run npm run dev to start both services.</Empty></div> : <>
+        {!data ? <div className="panel"><Empty icon={Database} title="Connecting to your workspace">The local service is starting or reconnecting. Your saved work stays on this computer.</Empty><button className="button secondary" onClick={()=>void refresh().catch(e=>setError(e.message))}>Retry connection</button></div> : <>
         {page === 'Dashboard' && <>
           <div className="stats">{[
             {icon:Globe2, label:'CURRENT OFFICIAL ALERTS', value:data.stats.current_alerts, footer:officialCount ? 'Freshness checked at source time' : 'No official sources collected', tone:'teal'},
@@ -95,6 +106,7 @@ export default function App() {
         </>}
         {page === 'Weather Intelligence' && <WeatherDesk advisories={data.advisories} intelligence={data.intelligence} advisory={advisory} busy={!!busy}
           onSelect={setSelected} onDraft={item => {void draft(item);}}
+          onUseInVideo={item => {try {const key='wetha-bulletin-builder-v1'; const saved=JSON.parse(localStorage.getItem(key) || '{}'); const ids: string[] = Array.isArray(saved.ids) ? saved.ids : []; localStorage.setItem(key, JSON.stringify({...saved, ids: ids.includes(item.id) ? ids : [...ids, item.id].slice(-12)}));} catch {/* The story can still be chosen on the next page. */} setPage('Video Production');}}
           onTraining={() => {void action('Loading training data', async () => {await api('/training/load', {}); setNotice('Training data loaded — not real observations.');});}}
           onPolling={(feed: Feed, enabled, interval) => {void action('Saving polling schedule', async () => {await api(`/feeds/${feed.id}/polling`, {enabled, interval_seconds:interval}); setNotice(`${feed.id.toUpperCase()} automatic collection ${enabled ? 'enabled' : 'paused'}. Settings persist across restarts.`);});}}
           onRefresh={feed => {void action(`Refreshing ${feed.id.toUpperCase()}`, async () => {const result = await api<{collected:number; rejected:number}>(`/providers/${feed.id}/refresh`, {}); setNotice(`${feed.id.toUpperCase()}: ${result.collected} valid advisories; ${result.rejected} quarantined.`);});}}/>}
@@ -107,7 +119,7 @@ export default function App() {
         {(page === 'Media Library' || page === 'Video Production') && <Suspense fallback={<div className="panel detail-body">Loading production workspace…</div>}><Production key={page} page={page} data={data} onRefresh={refresh}/></Suspense>}
         {phaseInfo[page] && <section className="panel roadmap-panel"><div className="panel-header"><h2>{page}</h2><Pill tone="amber">{phaseInfo[page]!.phase} · not connected</Pill></div><div className="roadmap-body"><span className="roadmap-icon"><Clapperboard size={32}/></span><span className="eyebrow teal">THE NEXT PRODUCTION MILESTONE</span><h2>{page === 'OBS Controller' ? 'Broadcast begins with a verified program.' : 'Built on a reliable evidence workflow.'}</h2><p>{phaseInfo[page]!.description}</p><div className="requirements">{phaseInfo[page]!.requirements.map((r, i) => <div key={r}><span>0{i+1}</span>{r}</div>)}</div><button className="button primary" onClick={() => setPage('Weather Intelligence')}>Prepare weather evidence<ArrowRight size={16}/></button></div></section>}
         {page === 'Channel Manager' && <section className="panel"><div className="panel-header"><h2>Channel profile</h2><Pill>Single-channel foundation</Pill></div><div className="detail-body"><div className="channel-profile"><span className="brand-mark"><CloudSun size={28}/></span><div><h2>{data.channel.name}</h2><p>United States · English (US)</p></div></div><div className="settings-rows"><div><span>Channel ID</span><code>{data.channel.id}</code></div><div><span>Target program length</span><strong>60 minutes · future production target</strong></div><div><span>Automatic broadcast</span><Pill tone="amber">Disabled</Pill></div><div><span>Voice profile / streaming credentials</span><strong>Not configured</strong></div></div><p className="muted">Profiles are isolated in persistent storage. This milestone prepares one channel; independent production and broadcast queues arrive in later phases.</p></div></section>}
-        {page === 'Settings' && <div className="settings-grid"><section className="panel"><div className="panel-header"><h2>Runtime capabilities</h2><Pill tone="green">{health?.version}</Pill></div><div className="settings-rows">{Object.entries(health?.capabilities ?? {}).map(([name, available]) => <div key={name}><span>{nice(name)}</span><Pill tone={available ? 'green' : 'amber'}>{available ? 'Available' : 'Not configured'}</Pill></div>)}</div><div className="panel-footer">A binary being available does not mean its production integration is complete.</div></section><section className="panel"><div className="panel-header"><h2>Official source access</h2><ShieldCheck size={17}/></div><div className="detail-body"><p className="muted">Network access is checked when you fetch. Imported text retains unverified status, even when its reference points to an official domain.</p><div className="source-domain"><Globe2 size={16}/>api.weather.gov<span>NWS alerts</span></div><div className="source-domain"><Satellite size={16}/>www.nhc.noaa.gov<span>NHC advisories</span></div><div className="source-domain"><Satellite size={16}/>www.star.nesdis.noaa.gov<span>GOES · planned</span></div><p className="review-note">No paid API key is required for this milestone. Source issue times are displayed in UTC.</p></div></section><FootageKeys/></div>}
+        {page === 'Settings' && <div className="settings-grid"><section className="panel"><div className="panel-header"><h2>Runtime capabilities</h2><Pill tone="green">{health?.version}</Pill></div><div className="settings-rows">{Object.entries(health?.capabilities ?? {}).map(([name, available]) => <div key={name}><span>{nice(name)}</span><Pill tone={available ? 'green' : 'amber'}>{available ? 'Available' : 'Not configured'}</Pill></div>)}</div><div className="panel-footer">A binary being available does not mean its production integration is complete.</div></section><section className="panel"><div className="panel-header"><h2>Official source access</h2><ShieldCheck size={17}/></div><div className="detail-body"><p className="muted">Network access is checked when you fetch. Imported text retains unverified status, even when its reference points to an official domain.</p><div className="source-domain"><Globe2 size={16}/>api.weather.gov<span>NWS alerts</span></div><div className="source-domain"><Satellite size={16}/>www.nhc.noaa.gov<span>NHC advisories</span></div><div className="source-domain"><Satellite size={16}/>www.star.nesdis.noaa.gov<span>GOES satellite imagery</span></div><p className="review-note">No paid API key is required for this milestone. Source issue times are displayed in UTC.</p></div></section><FootageKeys/><StorageSettings/></div>}
         </>}
         <footer className="workspace-footer"><span><span className="dot green"/>Weather Intelligence Studio · AI newsroom</span><span>Official evidence. Clear provenance. Editorial control.</span></footer>
       </main>

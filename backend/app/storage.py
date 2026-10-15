@@ -342,6 +342,20 @@ class Store:
         with self.connection() as conn:
             return [json.loads(row['document']) for row in conn.execute(f'SELECT document FROM {table} ORDER BY created_at DESC, id')]
 
+    def production_count(self, kind: str, status: str) -> int:
+        table = self._production_table(kind)
+        with self.connection() as conn:
+            return conn.execute(f'SELECT count(*) FROM {table} WHERE status=?', (status,)).fetchone()[0]
+
+    def render_progress(self) -> list[dict]:
+        # Extract small progress records in SQLite rather than decoding every scene snapshot on each poll.
+        with self.connection() as conn:
+            rows = conn.execute("""SELECT json_object('id', id, 'status', status,
+                'stage', json_extract(document, '$.stage'), 'progress', json_extract(document, '$.progress'),
+                'error', json_extract(document, '$.error'), 'validation', json_extract(document, '$.validation'),
+                'attempts', json_extract(document, '$.attempts')) FROM production_renders ORDER BY created_at DESC, id""")
+            return [json.loads(row[0]) for row in rows]
+
     @staticmethod
     def _production_table(kind):
         return {'media': 'production_media', 'timelines': 'production_timelines', 'renders': 'production_renders', 'jobs': 'production_jobs'}[kind]

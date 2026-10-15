@@ -3,6 +3,7 @@ import {CheckCircle2, Circle, LoaderCircle, MinusCircle, XCircle} from 'lucide-r
 
 export interface AutoJob {
   id: string; status: string; stage: string; progress: number; error: string | null; render_id: string | null; timeline_id: string | null;
+  data?: {collected:string[];unavailable:string[]};
   stages: {key: string; label: string; status: string; detail: string}[];
   issues: {code: string; message: string}[];
   report: {errors: number; warnings: number; timings_seconds: Record<string, number>; cache: {reused_scenes: number; cached_on_retry: number; total_scenes: number};
@@ -19,6 +20,7 @@ export default function AutoProduction({job, busy, onResume, onCancel}: {job: Au
   const base = job.render_id ? `/api/production/renders/${job.render_id}` : '';
   return <section className="panel" aria-label="Automatic production progress"><div className="panel-header"><h2>Automatic production</h2><span className="pill">{job.status} · {job.progress}%</span></div><div className="detail-body">
     <ol className="auto-stages">{job.stages.map(stage => <li key={stage.key} className={`auto-stage ${stage.status}`}>{icons[stage.status] ?? icons.pending}<strong>{stage.label}</strong>{stage.detail && <span className="muted"> · {stage.detail}</span>}</li>)}</ol>
+    {job.data&&<details open={!job.data.collected.length}><summary>Weather layers · {job.data.collected.length} collected · {job.data.unavailable.length} availability notes</summary><ul>{job.data.collected.map((message,i)=><li key={'found'+i}>{message}</li>)}{job.data.unavailable.map((message,i)=><li key={'missing'+i}>{message}</li>)}</ul></details>}
     {job.error && <p role="alert" className="production-error">{job.error}</p>}
     <div className="production-actions">
       {active && <button className="button secondary" disabled={busy} onClick={onCancel}>Cancel</button>}
