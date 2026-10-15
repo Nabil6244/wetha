@@ -75,7 +75,13 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.weather",
-      "artifactName": "Weather-Intelligence-Studio-${version}-macOS-${arch}.${ext}"
+      "artifactName": "Weather-Intelligence-Studio-${version}-macOS-${arch}.${ext}",
+      "identity": "-",
+      "strictVerify": true,
+      "notarize": false,
+      "signIgnore": [
+        "/speech-model/"
+      ]
     },
     "portable": {
       "artifactName": "Weather-Intelligence-Studio-${version}-Windows-${arch}.exe",

@@ -49,6 +49,8 @@ jobs:
         run: |
           bundle=$(find release -path '*.app/Contents/Resources/backend-runtime/bin/python3' -print -quit)
           resources="$(dirname "$(dirname "$(dirname "$bundle")")")"
+          app="${resources%/Contents/Resources}"
+          codesign --verify --deep --strict --verbose=2 "$app"
           "$bundle" scripts/smoke-standalone.py --resources "$resources" --report "release/standalone-smoke-${{ matrix.platform }}.json"
       - uses: actions/upload-artifact@v4
         with:

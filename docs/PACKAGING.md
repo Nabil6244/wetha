@@ -41,3 +41,9 @@ The Apple Silicon DMG has been built locally, mounted read-only, copied into a s
 Windows EXE and Intel DMG have not been built or tested yet. True clean-machine installation tests, Windows DLL/runtime acceptance, macOS Developer ID signing/notarization, and Windows signing remain separate release checks. The current Mac artifact is an unsigned private test build; it is not a signed public release.
 
 Before distribution, test each artifact on an appropriate clean target machine: app launch, fresh projects, script/audio import, offline speech alignment, an actual narrated render, saved-state recovery, shutdown and reopening. Preserve the bundled component licenses and source/build notices.
+
+## macOS test-build signatures
+
+Test DMGs use explicit ad-hoc signing (`mac.identity: "-"`) with strict bundle verification. Skipping signing after Electron is renamed leaves its original linker signature invalid and can produce the misleading “damaged” message. CI now checks `codesign --verify --deep --strict` before uploading a Mac artifact, in addition to the runtime/render smoke test.
+
+Ad-hoc signing repairs bundle integrity; it does not provide a Developer ID or Apple notarization. macOS can still require explicit security approval for downloaded test builds. Normal trusted distribution requires Developer ID signing and notarization. No Gatekeeper or quarantine bypass is included.
