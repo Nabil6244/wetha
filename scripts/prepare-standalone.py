@@ -36,7 +36,10 @@ def bundle_windows_crt(runtime):
     for source in dlls:
         quoted=str(source).replace("'","''")
         command="$s=Get-AuthenticodeSignature -LiteralPath '"+quoted+"'; if($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'Microsoft'){exit 1}"
-        subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',command],check=True)
+        shell=shutil.which('pwsh') or shutil.which('powershell.exe')
+        if not shell:raise RuntimeError('PowerShell is required to verify Microsoft runtime signatures.')
+        shell_env=os.environ.copy();shell_env.pop('PSModulePath',None)
+        subprocess.run([shell,'-NoProfile','-NonInteractive','-Command',command],env=shell_env,check=True)
         shutil.copy2(source,runtime/source.name)
         records.append({'file':source.name,'version':versions[-1].name,'source':'Visual Studio app-local redistributables','sha256':hashlib.file_digest(source.open('rb'),'sha256').hexdigest()})
     notices=runtime/'notices'
