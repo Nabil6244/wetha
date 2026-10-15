@@ -3,6 +3,17 @@
 import argparse,json,os,shutil,socket,subprocess,sys,tempfile,time,urllib.error,urllib.request,wave
 from pathlib import Path
 
+def stop_backend(child):
+    if sys.platform=='win32' and child.poll() is None:
+        # terminate() is abrupt on Windows: descendants otherwise retain inherited log handles.
+        subprocess.run(['taskkill','/PID',str(child.pid),'/T','/F'],check=True,
+                       stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=20)
+    elif child.poll() is None:
+        child.terminate()
+    try:child.wait(timeout=20)
+    except subprocess.TimeoutExpired:child.kill();child.wait()
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--resources',type=Path,required=True);p.add_argument('--report',type=Path,required=True);args=p.parse_args()
     resources=args.resources.resolve();runtime=resources/'backend-runtime';tools=runtime/'tools';model=runtime/'speech-model'
@@ -54,9 +65,7 @@ def main():
             args.report.parent.mkdir(parents=True,exist_ok=True);args.report.write_text(json.dumps(result,indent=2)+'\n')
             print(json.dumps(result,indent=2))
         finally:
-            child.terminate()
-            try:child.wait(timeout=20)
-            except subprocess.TimeoutExpired:child.kill();child.wait()
-            log.close()
+            try:stop_backend(child)
+            finally:log.close()
 
 if __name__=='__main__':main()

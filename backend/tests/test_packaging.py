@@ -22,3 +22,17 @@ def test_windows_signature_check_uses_matching_shell_without_inherited_modules(t
     assert 'PSModulePath' not in calls[0][1]['env']
     assert 'Get-AuthenticodeSignature' in calls[0][0][-1] and calls[0][1]['check'] is True
     assert result[0]['file']=='msvcp140.dll' and (runtime/'msvcp140.dll').exists()
+
+
+def test_windows_smoke_cleanup_stops_workers_before_deleting_logs(monkeypatch):
+    from unittest.mock import Mock
+    spec=importlib.util.spec_from_file_location('standalone_smoke',Path(__file__).resolve().parents[2]/'scripts/smoke-standalone.py')
+    smoke=importlib.util.module_from_spec(spec);spec.loader.exec_module(smoke)
+    monkeypatch.setattr(smoke,'sys',SimpleNamespace(platform='win32'))
+    child=Mock(pid=1234);child.poll.return_value=None
+    run=Mock();monkeypatch.setattr(smoke.subprocess,'run',run)
+    smoke.stop_backend(child)
+    assert run.call_args.args[0]==['taskkill','/PID','1234','/T','/F']
+    assert run.call_args.kwargs['check'] is True
+    child.wait.assert_called_once_with(timeout=20)
+    child.terminate.assert_not_called()
