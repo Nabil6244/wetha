@@ -13,7 +13,8 @@ def test_keys_are_owner_only_and_status_never_contains_them(tmp_path, monkeypatc
     monkeypatch.delenv('PEXELS_API_KEY', raising=False);monkeypatch.delenv('PIXABAY_API_KEY', raising=False)
     store = Credentials(tmp_path)
     status = store.update({'pexels': KEY})
-    assert stat.S_IMODE(os.stat(tmp_path / 'credentials.json').st_mode) == 0o600
+    if os.name != 'nt':  # Windows has no Unix permission bits; the file lives in the user's private profile folder there.
+        assert stat.S_IMODE(os.stat(tmp_path / 'credentials.json').st_mode) == 0o600
     assert KEY not in json.dumps(status) and status['pexels'] == {'configured': True, 'source': 'saved in app'}
     assert store.get('pexels') == KEY and store.get('pixabay') is None
     monkeypatch.setenv('PEXELS_API_KEY', 'EnvironmentKey0123456789abcd')
