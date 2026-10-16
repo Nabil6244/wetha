@@ -111,6 +111,11 @@ class Orchestrator:
                 'music': False, 'music_bed': request['music_bed'], 'template': None,
                 'scenes': request.get('scenes') or [{'id': s['id'], 'seconds': max(1, min(120, s.get('target_seconds') or 4)), 'transition': 'cut'} for s in plan['scenes']]}
 
+    def fits(self, body):
+        """The scene lengths sent with the request add up to the voiceover (within 0.2 s), so they can stand in for spoken timing."""
+        narration = self.store.production_get('media', body['narration_id'])
+        return abs(sum(round(s['seconds'] * 30) for s in body['scenes']) - round(narration['seconds'] * 30)) <= 6
+
     async def estimated(self, job, body, reason):
         """Speech matching is unavailable: spread the voiceover over the script by word count, cut it into shots, and carry on."""
         from .automatic_edit import subdivide
@@ -139,7 +144,7 @@ class Orchestrator:
             try:
                 result = await asyncio.to_thread(self.prepare, TimelineRequest(**body))
             except AlignmentBusy as busy:
-                if job['request'].get('scenes') and job['request'].get('narration_verified'):
+                if job['request'].get('scenes') and job['request'].get('narration_verified') and self.fits(body):
                     job['issues'].append({'code': 'timing_fallback', 'message': 'Another recording is being aligned. Using your confirmed fitted scene timing; word-level alignment was not applied.'})
                     self.stage(job, 'align', 'done', 'Confirmed fitted timing used; speech engine busy')
                     return await asyncio.to_thread(self.prepare, TimelineRequest(**body), False)
@@ -160,7 +165,8 @@ class Orchestrator:
                 self.stage(job, 'align', 'running', f"{alignment['stage']} · {round(alignment.get('progress', 0) * 100)}%", alignment.get('progress', 0))
             if alignment['status'] != 'completed':
                 reason = alignment.get('error') or 'Speech alignment failed.'
-                if not job['request'].get('scenes'):
+                if not (job['request'].get('scenes') and self.fits(body)):
+                    # Scene lengths that do not add up to the voiceover (the app sends whatever is on screen) are never trusted.
                     return await self.estimated(job, body, reason)
                 # Estimated timing fallback: the editor's fitted scene durations, checked against the voiceover length.
                 job['issues'].append({'code': 'timing_fallback', 'message': reason + ' Using your fitted scene timing instead of spoken word timing.'})

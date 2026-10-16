@@ -120,7 +120,9 @@ def test_failed_speech_matching_estimates_timing_from_the_script_and_still_finis
             alignment.jobs[row['id']] = row
             return row
         alignment.start = failing_start
-        started = client.post('/api/production/auto', json={'plan_id': plan['id'], 'narration_id': audio['id'], 'title': 'No speech engine update'})
+        # The app always sends the scene lengths on screen; here they are the plan's own and do not add up to the voiceover.
+        scenes = [{'id': s['id'], 'seconds': 12, 'transition': 'cut'} for s in plan['scenes']]
+        started = client.post('/api/production/auto', json={'plan_id': plan['id'], 'narration_id': audio['id'], 'title': 'No speech engine update', 'scenes': scenes})
         job = wait(client, started.json()['id'])
         assert job['status'] == 'succeeded', job['error']
         assert any(i['code'] == 'timing_fallback' and 'speech model is not installed' in i['message'] for i in job['issues'])
