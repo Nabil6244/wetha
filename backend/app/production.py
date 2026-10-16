@@ -119,6 +119,16 @@ def scene_geography(identity, cited_ids, geography_of):
              for source_id in dict.fromkeys(cited_ids) if source_id != identity for f in geography_of(source_id)['features']]
     return own, ({'type': 'FeatureCollection', 'features': cited} if cited else None)
 
+def source_warnings(script):
+    """Paragraphs whose numbers the cited alerts do not state, and a missing source-context opening. Kept as written."""
+    audit = script.get('preview_audit') or {}
+    rows = [f"Paragraph {i + 1}: {', '.join(row['unsupported_numbers'] + row['conflicts'])} not found in the cited NWS alerts; kept as written."
+            for i, row in enumerate(audit.get('claims', [])) if row['status'] == 'needs_attention']
+    if any(issue['code'] == 'missing_context' for issue in (script.get('editorial') or {}).get('issues', [])):
+        rows.append('The opening does not name its source and time; kept as written.')
+    return rows
+
+
 class Production:
     def __init__(self, store, describe_script, describe_scripts=None):
         self.store = store
@@ -493,13 +503,8 @@ class Production:
         script = self.describe_script(self.store.script(plan['script_id']))
         if script['revision'] != plan['script_revision'] or hashlib.sha256(script['text'].encode()).hexdigest() != plan['script_text_checksum']:
             raise RevisionConflict('The script changed. Create a new visual plan and timeline from the latest revision.')
-        if require_support and (not script.get('claims') or any(c['status'] == 'requires_verification' for c in script['claims'])):
-            audit = script.get('preview_audit', {})
-            if not audit.get('ready'):
-                details = [f"Paragraph {i+1}: unsupported values {', '.join(row['unsupported_numbers']+row['conflicts'])}" for i,row in enumerate(audit.get('claims', [])) if row['status']=='needs_attention']
-                raise ValueError('Automatic source check needs attention. ' + ' '.join(details) if details else 'Resolve unsupported script claims before rendering a production preview.')
-        if any(issue['code'] == 'missing_context' for issue in script['editorial']['issues']):
-            raise ValueError('Restore the original source-context opening before rendering.')
+        # The script is the editor's final word: values the alerts do not state are reported, never a reason to stop the video.
+        script['source_check_warnings'] = source_warnings(script) if require_support else []
         if any(self.store.advisory(row['id']).checksum != row['checksum'] for row in plan['evidence_manifest']):
             raise ValueError('The pinned evidence manifest no longer matches preserved source content.')
         if script['label'] in ('withdrawn', 'cancelled', 'quarantined'):
@@ -684,7 +689,7 @@ class Production:
                            'observations': observations if not asset else []})
         audit = script.get('preview_audit')
         story_geographies = {}
-        if audit and audit['ready']:
+        if audit and audit.get('claims'):  # Each paragraph keeps its story's geography even when a value is flagged.
             from .visuals import VisualEvidence
             from .intelligence import IntelligenceDesk
             visual = VisualEvidence(self.store)

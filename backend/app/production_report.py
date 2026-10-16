@@ -97,6 +97,10 @@ def source_ages(timeline, advisory_lookup, now=None):
 
 def build(job, timeline, media, qc_log, srt, advisory_lookup, timings):
     measured = parse_qc(qc_log);findings = []
+    # The script was rendered as written; values the cited alerts do not state are listed for the editor to review.
+    for i, row in enumerate((timeline.get('preview_audit') or {}).get('claims', [])):
+        if row.get('status') == 'needs_attention':
+            findings.append(('warning', 'source_mismatch', f"Paragraph {i + 1}: {', '.join(row['unsupported_numbers'] + row['conflicts'])} not found in the cited NWS alerts; kept as written."))
     target = loudness_target()
     if measured['integrated_lufs'] is not None and abs(measured['integrated_lufs'] - target) > 2:
         findings.append(('warning', 'loudness', f"Integrated loudness {measured['integrated_lufs']:.1f} LUFS; target {target:g} ± 2."))

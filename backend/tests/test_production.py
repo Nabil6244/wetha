@@ -193,7 +193,9 @@ def test_timeline_preserves_revision_claim_order_and_explicit_timing(tmp_path):
         latest = client.get('/api/scripts/' + script['id']).json()
         plan2 = client.post('/api/visuals/plans', json={'script_id': script['id'], 'expected_revision': latest['revision']}).json()
         unsupported = {**body, 'plan_id': plan2['id'], 'scenes': [{'id': s['id'], 'seconds': 1} for s in plan2['scenes']]}
-        assert client.post('/api/production/timelines', json=unsupported).status_code == 422
+        # The script is top priority: it is rendered as written and the unsupported claim is reported, not refused.
+        flagged = client.post('/api/production/timelines', json=unsupported)
+        assert flagged.status_code == 200 and not flagged.json()['preview_audit']['ready']
 
 
 def test_real_render_image_footage_audio_export_and_persistence(tmp_path):

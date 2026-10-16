@@ -227,12 +227,15 @@ class Orchestrator:
             # 1. Validate.
             self.stage(job, 'validate', 'running')
             plan = self.current_plan(job, self.store.visual_plan(job['plan_id']))
-            self.production.validate_plan(plan)
+            script = self.production.validate_plan(plan)
+            warnings = script.get('source_check_warnings') or []
+            job['issues'] += [{'code': 'source_check', 'message': m} for m in warnings]
             narration = self.store.production_get('media', request['narration_id'])
             if narration['kind'] != 'audio':
                 raise ValueError('Choose the uploaded voiceover audio.')
             self.production.media_path(narration)
-            self.stage(job, 'validate', 'done', f"Voiceover {narration['seconds']:.1f}s · {len(plan['scenes'])} script sections")
+            self.stage(job, 'validate', 'done', f"Voiceover {narration['seconds']:.1f}s · {len(plan['scenes'])} script sections"
+                       + (f" · {len(warnings)} script values not in the sources, kept as written" if warnings else ''))
             # Library clips imported before analysis would otherwise be cut blind across slates, black and camera changes.
             if self.production.unanalyzed_media():
                 def progress(index, total, name):

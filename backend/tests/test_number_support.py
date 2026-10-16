@@ -55,3 +55,26 @@ def test_numbers_the_alerts_never_gave_are_still_blocked():
         row = check(text)[0]
         assert row['status'] == 'needs_attention', case
     assert '6000' in check(wrong['6,000 feet'])[0]['unsupported_numbers']
+
+
+def test_marine_winds_written_as_kt_support_narrated_knots():
+    gale = SimpleNamespace(id='gale', area='Coastal waters from Cape Fear to Surf City NC out 20 nm', title='Gale Warning', checksum='g' * 64,
+                           issued_at=ISSUED, expires_at=EXPIRES,
+                           text='Gale Warning issued October 12 at 5:03AM EDT by NWS Wilmington NC\n\n'
+                                '* WHAT...Northwest winds 30 to 40 kt with gusts up to 55 kt and seas 8 to 12 ft.')
+    document = {'advisory_id': 'gale', 'selected_advisory_ids': ['gale'], 'text': 'x',
+                'claims': [{'id': 'c', 'text': 'Off Cape Fear, northwest winds of 30 to 40 knots could gust to 55 knots, with seas of 8 to 12 feet.'},
+                           {'id': 'w', 'text': 'Off Cape Fear, northwest winds of 30 to 45 knots are expected.'}]}
+    rows = audit(document, [gale])['claims']
+    assert rows[0]['status'] == 'source_matched', (rows[0]['unsupported_numbers'], rows[0]['conflicts'])
+    assert rows[1]['status'] == 'needs_attention'   # a wind range the alert never gave is still blocked
+
+
+def test_a_local_evening_date_matches_an_alert_stored_in_utc():
+    late = SimpleNamespace(id='late', area='Cape Fear NC', title='Gale Warning', checksum='l' * 64, text='Gale Warning for coastal waters.',
+                           issued_at=datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc), expires_at=None)   # 8:15 p.m. EDT on October 26
+    document = {'advisory_id': 'late', 'selected_advisory_ids': ['late'], 'text': 'x',
+                'claims': [{'id': 'a', 'text': 'This Gale Warning for Cape Fear was issued on the evening of October 26.'},
+                           {'id': 'b', 'text': 'This Gale Warning for Cape Fear was issued on October 20.'}]}
+    rows = audit(document, [late])['claims']
+    assert rows[0]['status'] != 'needs_attention' and rows[1]['status'] == 'needs_attention'

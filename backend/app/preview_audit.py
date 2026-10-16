@@ -1,5 +1,6 @@
 """Local preview audit. Evidence matching never grants human or broadcast approval."""
 import re
+from datetime import timedelta
 from .polished import terms
 
 WORDS = dict(zip('zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety'.split(), list(range(20))+list(range(20,100,10))))
@@ -14,6 +15,7 @@ def canonical(text):
     text = re.sub(r'(?<![\d.])(\d+)\.0+(?![\d.])', r'\1', text)
     text = re.sub(r'\b(miles per hour|mph)\b', 'mph', text)
     text = re.sub(r'\bnautical miles?\b', 'nm', text)
+    text = re.sub(r'(?<=\d)\s*kts?\b', ' knots', text)  # NWS marine text writes "30 to 40 kt"; narration says "knots".
     text = re.sub(r'\bfeet\b','ft',text)
     text = re.sub(r'\binches\b','in',text)
     # "one of the areas", "no one" and "one another" are idioms, not the measurement 1.
@@ -40,7 +42,9 @@ def source_dates(sources):
     values = set()
     for a in sources:
         for stamp in (getattr(a, 'issued_at', None), getattr(a, 'expires_at', None)):
-            if stamp:values |= {str(stamp.day), str(stamp.year)}
+            if stamp:
+                # Stored in UTC; narration uses the local US date ("October 26" for 8 p.m. EDT is the 27th in UTC).
+                values |= {str((stamp - timedelta(hours=h)).day) for h in (0, 4, 5, 6, 7, 8, 9, 10)} | {str(stamp.year)}
         values |= calendar_values(a.text)
     return values
 
@@ -122,7 +126,7 @@ def audit(document, evidence):
                 combined=best.text+' '+stamps(best)
                 unsupported=sorted(spoken-numeric_tokens(combined))
         # A written date is supported when it is one of this script's own alerts' issue or expiry dates.
-        dates=calendar_values(text)&source_dates(sources)
+        dates=calendar_values(text)&source_dates(selected_sources)
         unsupported=[n for n in unsupported if n not in dates]
         # A stated interval between related alerts is derived from their actual issue times.
         for delay in re.findall(r'\b(\d+) minutes? later\b',canonical(text)):
