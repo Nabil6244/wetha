@@ -26,6 +26,7 @@ def orchestration(prepare):
     engine.prepare=prepare
     engine.alignment=SimpleNamespace(get=Mock(return_value={'status':'completed'}))
     engine.stage=Mock()
+    engine.store=SimpleNamespace(production_get=lambda kind,identity:{'seconds':4})  # The voiceover is as long as the one scene.
     body={'plan_id':'plan','title':'Weather bulletin','narration_id':'voice','scenes':[{'id':'scene','seconds':4}]}
     job={'request':{},'issues':[]}
     return engine,body,job
