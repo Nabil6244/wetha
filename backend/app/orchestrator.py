@@ -106,9 +106,30 @@ class Orchestrator:
     def base_body(self, job, plan):
         request = job['request']
         return {'plan_id': plan['id'], 'title': request['title'], 'narration_id': request['narration_id'],
-                'narration_verified': request['narration_verified'], 'presentation': 'broadcast', 'automatic_graphs': True,
+                # The editor chose this voiceover for this script: it is used as recorded, and a weak word match is only reported.
+                'narration_verified': True, 'presentation': 'broadcast', 'automatic_graphs': True,
                 'music': False, 'music_bed': request['music_bed'], 'template': None,
                 'scenes': request.get('scenes') or [{'id': s['id'], 'seconds': max(1, min(120, s.get('target_seconds') or 4)), 'transition': 'cut'} for s in plan['scenes']]}
+
+    async def estimated(self, job, body, reason):
+        """Speech matching is unavailable: spread the voiceover over the script by word count, cut it into shots, and carry on."""
+        from .automatic_edit import subdivide
+        plan = self.store.visual_plan(body['plan_id'])
+        narration = self.store.production_get('media', body['narration_id'])
+        frames = round(narration['seconds'] * 30);sections = plan['scenes'];weights = [max(1, len(s['script_segment'].split())) for s in sections]
+        if frames < 30 * len(sections):
+            raise ValueError(f"The voiceover is {narration['seconds']:.0f}s long, too short for {len(sections)} script sections. Check that it is the recording of this script.")
+        spare = frames - 30 * len(sections);quota = [spare * w / sum(weights) for w in weights]
+        lengths = [30 + int(q) for q in quota]
+        for i in sorted(range(len(sections)), key=lambda i: quota[i] - int(quota[i]), reverse=True)[:frames - sum(lengths)]:
+            lengths[i] += 1
+        fitted = {'id': str(uuid4()), 'result': {'scenes': [{'id': sec['id'], 'seconds': n / 30} for sec, n in zip(sections, lengths)], 'coverage': 0,
+                                                 'timing_basis': 'Estimated from word counts; speech alignment unavailable'}}
+        new_plan, _derived, edits = subdivide(plan, fitted)
+        self.store.save_visual_plan(new_plan)
+        job['issues'].append({'code': 'timing_fallback', 'message': f'{reason} Timing was estimated from the script\'s word counts, so cuts may sit slightly off the spoken words.'})
+        self.stage(job, 'align', 'done', 'Estimated timing used; speech alignment unavailable')
+        return await asyncio.to_thread(self.prepare, TimelineRequest(**{**body, 'plan_id': new_plan['id'], 'scenes': edits}), False)
 
     async def prepared(self, job, body):
         """Run prepare; when it starts speech alignment, wait for it and prepare again."""
@@ -123,8 +144,11 @@ class Orchestrator:
                     self.stage(job, 'align', 'done', 'Confirmed fitted timing used; speech engine busy')
                     return await asyncio.to_thread(self.prepare, TimelineRequest(**body), False)
                 self.stage(job, 'align', 'running', 'Waiting for the other recording to finish alignment')
+                waited = 0
                 while self.alignment.get(busy.job_id)['status'] in ('queued', 'running'):
-                    await asyncio.sleep(POLL)
+                    await asyncio.sleep(POLL);waited += POLL
+                    if waited > 1800:  # A stuck engine never holds the video hostage.
+                        return await self.estimated(job, body, 'The speech engine stayed busy.')
                 continue
             if result['status'] != 'aligning':
                 return result
@@ -137,7 +161,7 @@ class Orchestrator:
             if alignment['status'] != 'completed':
                 reason = alignment.get('error') or 'Speech alignment failed.'
                 if not job['request'].get('scenes'):
-                    raise ValueError(reason)
+                    return await self.estimated(job, body, reason)
                 # Estimated timing fallback: the editor's fitted scene durations, checked against the voiceover length.
                 job['issues'].append({'code': 'timing_fallback', 'message': reason + ' Using your fitted scene timing instead of spoken word timing.'})
                 self.stage(job, 'align', 'done', 'Fitted timing used; speech alignment unavailable')
@@ -246,7 +270,10 @@ class Orchestrator:
             body = self.base_body(job, plan)
             result = await self.prepared(job, body)
             if not any(i['code'] == 'timing_fallback' for i in job['issues']):
-                self.stage(job, 'align', 'done', f"{round((result.get('alignment') or {}).get('result', {}).get('coverage', 1) * 100)}% of script words matched")
+                coverage = (result.get('alignment') or {}).get('result', {}).get('coverage', 1)
+                self.stage(job, 'align', 'done', f"{round(coverage * 100)}% of script words matched")
+                if coverage < .95:
+                    job['issues'].append({'code': 'audio_match', 'message': f'The voiceover matched {round(coverage * 100)}% of the script words; it was used as recorded.'})
             self.stage(job, 'plan', 'running')
             needs = (result.get('mixed_edit') or {}).get('footage_needs', [])
             self.stage(job, 'plan', 'done', f"{len(result['body']['scenes'])} shots · {len(needs)} footage gaps")

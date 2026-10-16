@@ -593,8 +593,8 @@ class Production:
                 issues.append({'code':'long_visual_hold', 'message':f"The longest map/graphic holds for {coverage['longest_graphic_seconds']:g} seconds. Add visual changes and footage before treating this as a finished edit."})
         map_issues = self.map_hold_issues(timeline)
         issues += map_issues
-        missing_long_footage = timeline.get('bulletin_target_minutes',0)>=30 and timeline['seconds']>=600 and not coverage['footage_clips']
-        return {'ready': not bool(map_issues) and not missing_long_footage, 'seconds': timeline['seconds'], 'issues': issues,
+        # A long bulletin with no usable footage is reported (no_footage above), never a reason to stop: maps and graphics carry it.
+        return {'ready': not bool(map_issues), 'seconds': timeline['seconds'], 'issues': issues,
                 'visual_coverage':coverage,
                 'note': 'Technical render checks only. Review the visual mix separately.'}
 
@@ -972,8 +972,6 @@ class Production:
         map_issues = self.map_hold_issues(timeline)
         if map_issues:
             raise ValueError(' '.join(issue['message'] for issue in map_issues))
-        if timeline.get('bulletin_target_minutes',0)>=30 and timeline['seconds']>=600 and not self.visual_coverage(timeline)['footage_clips']:
-            raise ValueError('This long bulletin has no footage. Build and review the mixed bulletin edit before exporting.')
         script = self.validate_plan(self.store.visual_plan(timeline['plan_id']))
         # Source status is re-evaluated on each attempt; the job snapshot stores the actual label used.
         media = {}

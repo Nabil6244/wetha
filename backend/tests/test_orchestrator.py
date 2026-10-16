@@ -97,3 +97,34 @@ def test_interrupted_production_resumes_after_restart(tmp_path):
         assert resumed['status'] == 'succeeded', resumed['error']
         render = client.app.state.store.production_get('renders', resumed['render_id'])
         assert render.get('reused_scenes', 0) > 0  # unchanged scenes come from the earlier render
+
+
+def test_a_weak_voiceover_match_is_used_as_recorded_with_a_warning(tmp_path):
+    with TestClient(create_app(tmp_path)) as client:
+        plan, audio = setup(client)
+        for row in client.app.state.alignment.jobs.values():
+            row['result']['coverage'] = .6
+        started = client.post('/api/production/auto', json={'plan_id': plan['id'], 'narration_id': audio['id'], 'title': 'Weak match update'})
+        job = wait(client, started.json()['id'])
+        assert job['status'] == 'succeeded', job['error']
+        assert any(i['code'] == 'audio_match' and '60%' in i['message'] for i in job['issues'])
+
+
+def test_failed_speech_matching_estimates_timing_from_the_script_and_still_finishes(tmp_path):
+    with TestClient(create_app(tmp_path)) as client:
+        plan, audio = setup(client)
+        alignment = client.app.state.alignment
+        alignment.jobs.clear()
+        def failing_start(plan_id, narration_id):
+            row = {'id': str(uuid4()), 'status': 'failed', 'stage': 'Failed', 'progress': 0, 'error': 'The speech model is not installed.'}
+            alignment.jobs[row['id']] = row
+            return row
+        alignment.start = failing_start
+        started = client.post('/api/production/auto', json={'plan_id': plan['id'], 'narration_id': audio['id'], 'title': 'No speech engine update'})
+        job = wait(client, started.json()['id'])
+        assert job['status'] == 'succeeded', job['error']
+        assert any(i['code'] == 'timing_fallback' and 'speech model is not installed' in i['message'] for i in job['issues'])
+        timeline = client.get('/api/production').json()['timelines']
+        used = next(t for t in timeline if t['id'] == job['timeline_id'])
+        assert abs(used['seconds'] - audio['seconds']) < .1                    # timing still spans the voiceover exactly
+        assert len(used['scenes']) >= len(plan['scenes'])                       # sections were cut into shots, so no map holds too long

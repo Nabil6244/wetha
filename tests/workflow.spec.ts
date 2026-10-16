@@ -1,5 +1,20 @@
 import {test, expect} from '@playwright/test';
 
+// Scene shots over ten seconds of map are refused on save (map-hold limit), so tests that save a timeline keep each scene short.
+async function shortenScenes(page: import('@playwright/test').Page, count: number) {
+  for (let i = 1; i <= count; i++) await page.getByRole('spinbutton', {name: `Scene ${i} seconds`, exact: true}).fill('8');
+}
+
+// The story list shows current alerts by default; older (training) stories sit behind a toggle that only appears when needed.
+async function storyCheckbox(page: import('@playwright/test').Page, id: RegExp) {
+  const topics = page.getByRole('group', {name: 'Bulletin stories', exact: true});
+  const box = topics.getByRole('checkbox', {name: id});
+  const older = page.getByRole('button', {name: /older or expired/});
+  await expect(box.or(older)).toBeVisible();
+  if (!(await box.count())) await older.click();
+  return box;
+}
+
 test('phase 5 imports licensed media and renders a source-linked silent preview', async ({page, request}) => {
   test.setTimeout(90000);
   await request.post('/api/training/load');
@@ -420,6 +435,7 @@ test('four map treatments can be selected checked and restored from a saved time
   for (const [i,mode] of ['track','warnings','radar','forecast'].entries()) {
     await page.getByLabel(`Scene ${i+1} map type`,{exact:true}).selectOption(mode);
   }
+  await shortenScenes(page, plan.scenes.length);
   await page.getByRole('button',{name:'Check visuals & timing',exact:true}).click();
   await expect(page.getByRole('region',{name:'Timeline checks'})).toContainText('No source warning polygon');
   await expect(page.getByRole('region',{name:'Timeline checks'})).toContainText('No matching timestamped radar');
@@ -464,7 +480,7 @@ test('regional workflow blocks other-state footage and restores reviewed focus',
   await request.post('/api/production/media',{headers:{'X-Media-Metadata':encodeURIComponent(JSON.stringify({name:'regional-synthetic.png',kind:'image',context:'illustrative',license:'Owned synthetic regional fixture',attribution:'Browser test creator',source:'Synthetic region test',rights_confirmed:true}))},data:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGOQC/UDAAFWAMID7WKmAAAAAElFTkSuQmCC','base64')});
   const media=(await (await request.get('/api/production')).json()).media.find((m:{kind:string})=>m.kind==='image');
   expect(media).toBeTruthy();
-  await request.put(`/api/production/media/${media.id}/catalog`,{data:{tags:['rain','wind'],region_codes:['NC'],location_reviewed:true,reference:'https://example.org/synthetic-region-test'}});
+  await request.put(`/api/production/media/${media.id}/catalog`,{data:{tags:['rain','wind'],region_codes:['WA'],location_reviewed:true,reference:'https://example.org/synthetic-region-test'}});
   await page.goto('/');
   await page.getByRole('button',{name:'Create Video',exact:true}).click();
   await page.getByText('Continue an existing script or saved video', {exact:true}).click();
@@ -491,6 +507,7 @@ test('regional workflow blocks other-state footage and restores reviewed focus',
   await page.getByLabel('VIDEO STYLE',{exact:true}).selectOption('broadcast');
   await page.getByLabel('Scene 1 regional focus',{exact:true}).selectOption('FL');
   await page.getByLabel('Scene 1 media',{exact:true}).selectOption(media.id);
+  await shortenScenes(page, plan.scenes.length);
   await page.getByRole('button',{name:'Save timeline',exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'Timeline saved'})).toBeVisible();
   const timeline=await page.getByLabel('SAVED PRODUCTION TIMELINE').inputValue();
@@ -536,18 +553,14 @@ test('manual voiceover copies the script, uploads audio and renders with fitted 
   await panel.getByRole('button', {name:'Upload audio for this video', exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'Audio uploaded and selected'})).toBeVisible();
   await expect(page.locator('#production-finish .production-narration audio')).toHaveAttribute('src', /\/api\/production\/media\/.+\/file/);
-  await expect(page.getByRole('button',{name:'Make final video',exact:true})).toBeDisabled();
-  await page.getByLabel('I listened and this voiceover matches the script.').check();
-  const before = (await (await request.get('/api/production')).json()).renders.length;
-  await page.getByRole('button',{name:'Make final video',exact:true}).click();
-  await expect(page.getByRole('alert')).toContainText('match measured narration duration');
-  expect((await (await request.get('/api/production')).json()).renders.length).toBe(before);
   await page.getByText('Estimated timing fallback',{exact:true}).click();
   await page.getByRole('button', {name:'Match video length to voiceover',exact:true}).click();
   await page.getByLabel('I listened and this voiceover matches the script.').check();
   await page.getByLabel('Video title', {exact:true}).fill('Manual voiceover integration');
   await page.getByRole('button', {name:'Make final video',exact:true}).click();
-  await expect(page.getByRole('status').filter({hasText:'Your video is rendering locally'})).toBeVisible();
+  // Make final video starts one saved automatic job: speech matching, planning and the render follow without further input.
+  await expect(page.getByRole('status').filter({hasText:'Automatic production started'})).toBeVisible();
+  await expect(page.getByRole('status').filter({hasText:'Your video is rendering locally'})).toBeVisible({timeout:120000});
   await expect(page.getByRole('status',{name:'Export progress'})).toContainText('Export');
   await expect(page.getByRole('button',{name:'Rendering video…',exact:true})).toBeDisabled();
   await expect(page.getByLabel('SAVED PRODUCTION TIMELINE')).not.toHaveValue('');
@@ -557,7 +570,7 @@ test('manual voiceover copies the script, uploads audio and renders with fitted 
   expect(saved.seconds).toBeCloseTo(Math.round(seconds*30)/30,2);
   expect(saved.template).toBeNull();
   const job = page.locator('.production-job').filter({has:page.getByRole('heading', {name:'Manual voiceover integration',exact:true})});
-  await expect(job).toContainText('full output decoded',{timeout:70000});
+  await expect(job).toContainText('full output decoded',{timeout:150000});
   await expect(page.locator('#production-finish').getByRole('link',{name:'Download final MP4',exact:true})).toBeVisible();
   const completed = (await (await request.get('/api/production')).json()).renders.find((r:{timeline_id:string}) => r.timeline_id===id);
   expect(completed.validation.audio_mode).toBe('imported_narration');
@@ -615,7 +628,7 @@ test('Create Video builds ordered flowing narration and restores unfinished work
   await page.getByLabel('Bulletin target length').selectOption('60');
   await page.getByRole('button',{name:/Show \d+ older or expired/}).click();
   const topics=page.getByRole('group',{name:'Bulletin stories',exact:true});
-  await topics.getByRole('checkbox',{name:/training:cyclone:1$/}).check();
+  await (await storyCheckbox(page,/training:cyclone:1$/)).check();
   await topics.getByRole('checkbox',{name:/training:cyclone:2$/}).check();
   await page.getByRole('button',{name:'Move story 2 up',exact:true}).click();
   const response=page.waitForResponse(r=>r.url().endsWith('/api/newsroom/runs')&&r.request().method()==='POST');
@@ -652,7 +665,7 @@ test('Create Video imports polished narration with per-paragraph sources', async
   await request.post('/api/training/load');await page.goto('/');
   await page.getByRole('button',{name:'Create Video',exact:true}).click();
   const topics=page.getByRole('group',{name:'Bulletin stories',exact:true});
-  await topics.getByRole('checkbox',{name:/training:cyclone:1$/}).check();
+  await (await storyCheckbox(page,/training:cyclone:1$/)).check();
   await topics.getByRole('checkbox',{name:/training:cyclone:2$/}).check();
   await page.getByRole('button',{name:'Build flowing bulletin (2 stories)',exact:true}).click();
   await expect(page.getByRole('button',{name:'Copy source pack',exact:true})).toBeEnabled();
@@ -682,7 +695,7 @@ test('Create Video automatically saves refined narration without paragraph dropd
   await request.post('/api/training/load');await page.goto('/');
   await page.getByRole('button',{name:'Create Video',exact:true}).click();
   const topics=page.getByRole('group',{name:'Bulletin stories',exact:true});
-  await topics.getByRole('checkbox',{name:/training:cyclone:1$/}).check();
+  await (await storyCheckbox(page,/training:cyclone:1$/)).check();
   await topics.getByRole('checkbox',{name:/training:cyclone:2$/}).check();
   await page.getByRole('button',{name:'Build flowing bulletin (2 stories)',exact:true}).click();
   const text='The first storm report describes its winds and official guidance.\n\nThe next report provides an update. Follow the official advice for your area.';

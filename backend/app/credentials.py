@@ -52,11 +52,16 @@ class Credentials:
         # Write to an owner-only temporary file, then replace, so the file is never briefly world-readable.
         handle, temporary = tempfile.mkstemp(dir=self.path.parent, prefix='.credentials-')
         try:
-            os.fchmod(handle, 0o600)
+            if hasattr(os, 'fchmod'):  # Not available on Windows, where the user's profile folder is already private.
+                os.fchmod(handle, 0o600)
             with os.fdopen(handle, 'w') as output:
                 json.dump(saved, output)
             os.replace(temporary, self.path)
         finally:
+            try:
+                os.close(handle)  # Already closed after a normal write; closing a leaked handle lets Windows delete the file.
+            except OSError:
+                pass
             if os.path.exists(temporary):
                 os.unlink(temporary)
         return self.status()

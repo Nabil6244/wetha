@@ -56,5 +56,5 @@ def test_documentary_route_rejects_unknown_artifacts_and_serves_captions(tmp_pat
         assert client.get('/api/production/documentary/unknown').status_code == 404
         response = client.get('/api/production/documentary/subtitles')
         assert response.status_code == 200
-        assert response.text == subtitles.read_text()
+        assert response.content == subtitles.read_bytes()   # served byte for byte; Windows text mode would turn \n into \r\n
         assert response.headers['content-type'].startswith('application/x-subrip')

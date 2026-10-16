@@ -1,0 +1,2 @@
+# Fixtures are checksummed byte for byte: never convert their line endings on checkout.
+backend/tests/fixtures/** -text

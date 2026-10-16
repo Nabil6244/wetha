@@ -1,4 +1,5 @@
 """Experimental vision screening: evidence-only findings, safe fallback, caching."""
+import json
 from app import footage_vision as fv
 
 SUNNY = {'labels': [['blue_sky', .97], ['palm_tree', .88], ['outdoor', .9]], 'text': [], 'text_regions': 0}
@@ -33,7 +34,7 @@ def test_results_are_cached_by_frame_content_and_version(tmp_path, monkeypatch):
     screener = fv.VisionScreen(tmp_path)
     frame = tmp_path / 'f.jpg';frame.write_bytes(b'frame-bytes')
     class Done:
-        stdout = '{"path": "%s", "labels": [["ocean", 0.9]], "text": [], "text_regions": 0}' % frame
+        stdout = json.dumps({'path': str(frame), 'labels': [['ocean', 0.9]], 'text': [], 'text_regions': 0})   # json escapes Windows backslashes
     monkeypatch.setattr(screener, 'tool', lambda: tmp_path / 'tool')
     monkeypatch.setattr(fv.subprocess, 'run', lambda *a, **k: calls.append(a) or Done())
     first = screener.screen([frame]);second = fv.VisionScreen(tmp_path).screen([frame])

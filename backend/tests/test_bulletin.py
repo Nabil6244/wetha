@@ -82,7 +82,8 @@ def test_thirty_minute_material_has_capacity_for_short_maps_without_padding(tmp_
               'scenes':[{'id':scene['id'],'seconds':1800/len(p['scenes']),'transition':'cut'} for scene in p['scenes']]}
         checked=client.post('/api/production/check',json=body)
         assert checked.status_code==200,checked.text
-        assert not checked.json()['ready'] # Footage is still absent; capacity alone is not a final edit.
+        # Footage is still absent: reported to the editor, but never a reason to refuse the edit; maps and graphics carry it.
+        assert any(i['code']=='no_footage' for i in checked.json()['issues'])
         assert not any(i['code']=='map_hold_limit' for i in checked.json()['issues'])
 
 
